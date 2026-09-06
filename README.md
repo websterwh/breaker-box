@@ -35,3 +35,11 @@ step 2 below.
 3. Save. The plugin checks whether the secret is currently set
    set" line only reflects changes made from this plugin).
 4. Use the buttons to set the secret to `M`, `R`, or clear it.
+
+## Deploy your own copy
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/websterwh/breaker-box/tree/main/proxy-worker)
+
+Click the button, sign in to your own Cloudflare account, and follow the
+prompts. Cloudflare will fork this repo into your GitHub account and deploy
+the Worker for you.
