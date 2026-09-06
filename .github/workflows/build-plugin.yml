@@ -1,11 +1,18 @@
 name: Build and Release Plugin
 
+# MOS Hub installs plugins by downloading a Debian package (.deb) matching
+# the selected architecture from this repo's latest GitHub release. Release
+# tags must be bare version numbers (e.g. "1.0.2"), NOT "v1.0.2" - MOS Hub
+# can't recognize a "v"-prefixed tag as a valid version, which is why
+# earlier v-prefixed releases weren't tracked as installed correctly across
+# reboots.
+
 on:
   push:
     branches:
       - main
     tags:
-      - "v*"
+      - "[0-9]*"
   workflow_dispatch:
 
 permissions:
@@ -30,7 +37,7 @@ jobs:
       - name: Build .deb packages
         run: |
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+            VERSION="${GITHUB_REF_NAME}"
           else
             VERSION="0.0.0-dev"
           fi
@@ -47,15 +54,25 @@ jobs:
             cat > "$PKGDIR/DEBIAN/control" <<EOF
           Package: breaker-box
           Version: $VERSION
-          Section: utils
-          Priority: optional
-          Architecture: all
+          Architecture: $ARCH
           Maintainer: websterwh
           Description: Breaker Box
            Flip a Cloudflare Worker's MODE secret (maintenance / restarting /
            off) from a button in MOS, via your own Cloudflare API token and
            a small CORS proxy Worker.
           EOF
+
+            cat > "$PKGDIR/DEBIAN/postinst" <<'EOF'
+          #!/bin/bash
+          exit 0
+          EOF
+            chmod +x "$PKGDIR/DEBIAN/postinst"
+
+            cat > "$PKGDIR/DEBIAN/postrm" <<'EOF'
+          #!/bin/bash
+          exit 0
+          EOF
+            chmod +x "$PKGDIR/DEBIAN/postrm"
 
             dpkg-deb --root-owner-group --build "$PKGDIR" "breaker-box_${VERSION}_${ARCH}.deb"
           done

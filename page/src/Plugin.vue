@@ -34,7 +34,27 @@
           <template v-else>—</template>
         </span>
       </div>
+      <div class="status-row" v-if="lastKnownState.revertAt">
+        <span class="label">Auto-reverts</span>
+        <span class="value">{{ fmtRevertAt(lastKnownState.revertAt) }}</span>
+      </div>
     </div>
+
+    <label class="timer-field" v-if="configComplete">
+      <span>Auto-revert to Normal after</span>
+      <select v-model.number="revertMinutes">
+        <option :value="0">No timer - stays until I clear it</option>
+        <option :value="5">5 minutes</option>
+        <option :value="15">15 minutes</option>
+        <option :value="30">30 minutes</option>
+        <option :value="60">1 hour</option>
+        <option :value="180">3 hours</option>
+      </select>
+      <small>Applies to Restarting/Under Maintenance below. Restarting also
+        auto-reverts the moment your site responds again, whichever comes
+        first. Requires the timer to be set up on the maintenance-proxy
+        Worker itself (see README) - otherwise this is silently ignored.</small>
+    </label>
 
     <div class="button-row">
       <button class="btn btn-off" :disabled="!configComplete || busy" @click="setMode('off')">
@@ -54,8 +74,8 @@
 
         <label class="field">
           <span>Proxy Worker URL</span>
-          <input v-model="form.proxyUrl" type="text" placeholder="https://cf-api-cors-proxy.you.workers.dev" />
-          <small>Your deployed <code>cf-api-cors-proxy</code> Worker (see plugin README).</small>
+          <input v-model="form.proxyUrl" type="text" placeholder="https://break-box-worker.you.workers.dev" />
+          <small>Your deployed <code>break-box-worker</code> Worker (see plugin README).</small>
         </label>
 
         <label class="field">
@@ -109,7 +129,8 @@ export default {
       checking: false,
       busy: null, // 'M' | 'R' | 'off' | null
       secretExists: null, // true | false | null (unknown)
-      lastKnownState: { value: null, setAt: null },
+      lastKnownState: { value: null, setAt: null, revertAt: null },
+      revertMinutes: 0, // 0 = no timer
       form: {
         proxyUrl: "",
         apiToken: "",
@@ -144,6 +165,14 @@ export default {
       if (hrs < 24) return `${hrs} hr${hrs === 1 ? "" : "s"} ago`;
       const days = Math.round(hrs / 24);
       return `${days} day${days === 1 ? "" : "s"} ago`;
+    },
+    fmtRevertAt(ts) {
+      if (!ts) return "—";
+      const mins = Math.round((ts - Date.now()) / 60000);
+      if (mins <= 0) return "any moment now";
+      if (mins < 60) return `in ~${mins} min`;
+      const hrs = Math.round(mins / 60);
+      return `in ~${hrs} hr${hrs === 1 ? "" : "s"}`;
     },
 
     // --- MOS auth token, same scanning approach as smart-health-dashboard ---
@@ -266,42 +295,56 @@ export default {
         this.checking = false;
       }
     },
+    revertSecretName() {
+      return `${this.form.secretName}_REVERT_AT`;
+    },
+    // DELETE is idempotent from the user's perspective: Cloudflare returns
+    // "Binding '<name>' not found" when the secret already doesn't exist,
+    // which just means we're already in the state we wanted, not a failure.
+    async deleteSecretIfPresent(name) {
+      const res = await fetch(`${this.secretsUrl()}/${name}`, {
+        method: "DELETE",
+        headers: this.cfAuthHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      const alreadyGone = !res.ok && /not found/i.test(data?.errors?.[0]?.message || "");
+      if (!res.ok && !alreadyGone) {
+        throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
+      }
+    },
+    async putSecret(name, text) {
+      const res = await fetch(this.secretsUrl(), {
+        method: "PUT",
+        headers: this.cfAuthHeaders(),
+        body: JSON.stringify({ name, text, type: "secret_text" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
+      }
+    },
     async setMode(state) {
       if (!this.configComplete || this.busy) return;
       this.busy = state;
       this.error = null;
       this.successMessage = null;
       try {
-        let res, data;
+        let revertAt = null;
+
         if (state === "off") {
-          res = await fetch(`${this.secretsUrl()}/${this.form.secretName}`, {
-            method: "DELETE",
-            headers: this.cfAuthHeaders(),
-          });
-          data = await res.json().catch(() => ({}));
-          // Cloudflare returns "Binding '<name>' not found" when deleting a
-          // secret that doesn't currently exist - that just means we're
-          // already in the state we wanted, not a real failure.
-          const alreadyCleared = !res.ok && /not found/i.test(data?.errors?.[0]?.message || "");
-          if (!res.ok && !alreadyCleared) {
-            throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
-          }
+          await this.deleteSecretIfPresent(this.form.secretName);
+          await this.deleteSecretIfPresent(this.revertSecretName());
         } else {
-          res = await fetch(this.secretsUrl(), {
-            method: "PUT",
-            headers: this.cfAuthHeaders(),
-            body: JSON.stringify({
-              name: this.form.secretName,
-              text: state,
-              type: "secret_text",
-            }),
-          });
-          data = await res.json().catch(() => ({}));
-          if (!res.ok || data.success === false) {
-            throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
+          await this.putSecret(this.form.secretName, state);
+          if (this.revertMinutes > 0) {
+            revertAt = Date.now() + this.revertMinutes * 60000;
+            await this.putSecret(this.revertSecretName(), String(revertAt));
+          } else {
+            await this.deleteSecretIfPresent(this.revertSecretName());
           }
         }
-        this.lastKnownState = { value: state, setAt: Date.now() };
+
+        this.lastKnownState = { value: state, setAt: Date.now(), revertAt };
         this.saveSettingsToServer();
         this.successMessage = `${this.modeLabel(state)} applied.`;
         await this.checkSecretExists();
@@ -383,6 +426,34 @@ export default {
 .badge-set { background: #4c1d1d; color: #fca5a5; }
 .badge-clear { background: #14532d; color: #86efac; }
 .badge-unknown { background: #374151; color: #d1d5db; }
+
+.timer-field {
+  display: block;
+  margin-bottom: 1rem;
+}
+.timer-field span {
+  display: block;
+  font-size: 0.85rem;
+  margin-bottom: 0.3rem;
+  color: #cbd5e1;
+}
+.timer-field select {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border-radius: 5px;
+  border: 1px solid #3a3a42;
+  background: #0f0f13;
+  color: #e8e8ec;
+  box-sizing: border-box;
+  font-size: 0.9rem;
+}
+.timer-field small {
+  display: block;
+  color: #7d7d85;
+  font-size: 0.75rem;
+  margin-top: 0.3rem;
+  line-height: 1.4;
+}
 
 .button-row {
   display: flex;
