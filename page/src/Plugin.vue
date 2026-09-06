@@ -29,7 +29,7 @@
         <span class="label">Last set from this plugin</span>
         <span class="value">
           <template v-if="lastKnownState.value">
-            {{ modeLabel(lastKnownState.value) }} {{ fmtAge(lastKnownState.setAt) }}
+            {{ modeLabel(lastKnownState.value) }} ({{ fmtAge(lastKnownState.setAt) }})
           </template>
           <template v-else>—</template>
         </span>
