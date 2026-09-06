@@ -74,8 +74,8 @@
 
         <label class="field">
           <span>Proxy Worker URL</span>
-          <input v-model="form.proxyUrl" type="text" placeholder="https://break-box-worker.you.workers.dev" />
-          <small>Your deployed <code>break-box-worker</code> Worker (see plugin README).</small>
+          <input v-model="form.proxyUrl" type="text" placeholder="https://breaker-box-worker.you.workers.dev" />
+          <small>Your deployed breaker-box-worker Worker.</small>
         </label>
 
         <label class="field">
