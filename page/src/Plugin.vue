@@ -34,22 +34,17 @@
           <template v-else>—</template>
         </span>
       </div>
-      <p class="note">
-        Cloudflare secrets are write-only — the API can confirm a secret exists but never
-        returns its value, so "last set" above only reflects changes made from this plugin,
-        not from elsewhere.
-      </p>
     </div>
 
     <div class="button-row">
-      <button class="btn btn-maint" :disabled="!configComplete || busy" @click="setMode('M')">
-        {{ busy === 'M' ? 'Setting…' : 'Under Maintenance' }}
+      <button class="btn btn-off" :disabled="!configComplete || busy" @click="setMode('off')">
+        {{ busy === 'off' ? 'Clearing…' : 'Normal' }}
       </button>
       <button class="btn btn-restart" :disabled="!configComplete || busy" @click="setMode('R')">
         {{ busy === 'R' ? 'Setting…' : 'Restarting' }}
       </button>
-      <button class="btn btn-off" :disabled="!configComplete || busy" @click="setMode('off')">
-        {{ busy === 'off' ? 'Clearing…' : 'Back to Normal' }}
+      <button class="btn btn-maint" :disabled="!configComplete || busy" @click="setMode('M')">
+        {{ busy === 'M' ? 'Setting…' : 'Under Maintenance' }}
       </button>
     </div>
 
@@ -66,7 +61,7 @@
         <label class="field">
           <span>Cloudflare API Token</span>
           <input v-model="form.apiToken" type="password" placeholder="your Cloudflare API token" />
-          <small>Needs "Edit Cloudflare Workers" permission. Sent only to your proxy Worker.</small>
+          <small>Needs "Edit Cloudflare Workers" permission.</small>
         </label>
 
         <label class="field">
@@ -283,6 +278,14 @@ export default {
             method: "DELETE",
             headers: this.cfAuthHeaders(),
           });
+          data = await res.json().catch(() => ({}));
+          // Cloudflare returns "Binding '<name>' not found" when deleting a
+          // secret that doesn't currently exist - that just means we're
+          // already in the state we wanted, not a real failure.
+          const alreadyCleared = !res.ok && /not found/i.test(data?.errors?.[0]?.message || "");
+          if (!res.ok && !alreadyCleared) {
+            throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
+          }
         } else {
           res = await fetch(this.secretsUrl(), {
             method: "PUT",
@@ -293,10 +296,10 @@ export default {
               type: "secret_text",
             }),
           });
-        }
-        data = await res.json().catch(() => ({}));
-        if (!res.ok || data.success === false) {
-          throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
+          data = await res.json().catch(() => ({}));
+          if (!res.ok || data.success === false) {
+            throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
+          }
         }
         this.lastKnownState = { value: state, setAt: Date.now() };
         this.saveSettingsToServer();

@@ -26,7 +26,7 @@ step 2 below.
 1. Install this plugin via the MOS Hub (see the parent Hub repo's README for
    adding a Hub repository).
 2. Open the plugin and click the settings icon. Fill in:
-   - **Proxy Worker URL** - your deployed `cf-api-cors-proxy` URL
+   - **Proxy Worker URL** - your deployed `break-box-worker` URL
    - **Cloudflare API Token** - needs "Edit Cloudflare Workers" permission
      for the account/script you're targeting
    - **Account ID** - your Cloudflare account ID
