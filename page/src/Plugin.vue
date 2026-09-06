@@ -317,6 +317,7 @@ export default {
   font-family: system-ui, sans-serif;
   padding: 1rem;
   max-width: 640px;
+  color: #e8e8ec;
 }
 .toolbar {
   display: flex;
@@ -327,6 +328,7 @@ export default {
 .toolbar h1 {
   font-size: 1.25rem;
   margin: 0;
+  color: #f2f2f4;
 }
 .toolbar-right {
   display: flex;
@@ -339,15 +341,16 @@ export default {
   font-size: 0.9rem;
 }
 .banner-warn {
-  background: #fff3cd;
-  color: #664d03;
+  background: #78350f;
+  color: #fde68a;
 }
 .banner-ok {
-  background: #d1e7dd;
-  color: #0f5132;
+  background: #14532d;
+  color: #bbf7d0;
 }
 .status-card {
-  border: 1px solid #ddd;
+  border: 1px solid #2a2a30;
+  background: #17171b;
   border-radius: 8px;
   padding: 0.9rem 1rem;
   margin-bottom: 1rem;
@@ -358,11 +361,14 @@ export default {
   padding: 0.25rem 0;
 }
 .status-row .label {
-  color: #666;
+  color: #9a9aa2;
+}
+.status-row .value {
+  color: #e8e8ec;
 }
 .note {
   font-size: 0.8rem;
-  color: #888;
+  color: #7d7d85;
   margin: 0.5rem 0 0;
 }
 .badge {
@@ -371,9 +377,9 @@ export default {
   font-size: 0.75rem;
   font-weight: 600;
 }
-.badge-set { background: #fde2e2; color: #9f1c1c; }
-.badge-clear { background: #d1e7dd; color: #0f5132; }
-.badge-unknown { background: #e2e3e5; color: #41464b; }
+.badge-set { background: #4c1d1d; color: #fca5a5; }
+.badge-clear { background: #14532d; color: #86efac; }
+.badge-unknown { background: #374151; color: #d1d5db; }
 
 .button-row {
   display: flex;
@@ -383,35 +389,56 @@ export default {
 .btn {
   padding: 0.5rem 1rem;
   border-radius: 6px;
-  border: 1px solid #ccc;
-  background: #f5f5f5;
+  border: 1px solid #3a3a42;
+  background: #1f1f24;
+  color: #e8e8ec;
   cursor: pointer;
   font-size: 0.9rem;
 }
+.btn:not(:disabled):hover {
+  border-color: #55555f;
+}
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: default;
 }
 .btn-icon {
   padding: 0.4rem 0.6rem;
 }
-.btn-maint { border-color: #d97706; }
-.btn-restart { border-color: #2563eb; }
-.btn-off { border-color: #16a34a; }
-.btn-primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+.btn-maint {
+  background: #78350f;
+  border-color: #d97706;
+  color: #fde68a;
+}
+.btn-restart {
+  background: #1e3a8a;
+  border-color: #2563eb;
+  color: #bfdbfe;
+}
+.btn-off {
+  background: #14532d;
+  border-color: #16a34a;
+  color: #bbf7d0;
+}
+.btn-primary {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
 
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 50;
 }
 .modal {
-  background: #fff;
-  color: #111;
+  background: #18181d;
+  color: #e8e8ec;
+  border: 1px solid #2a2a30;
   padding: 1.25rem 1.5rem;
   border-radius: 10px;
   width: 90%;
@@ -420,6 +447,7 @@ export default {
 .modal h2 {
   margin-top: 0;
   font-size: 1.1rem;
+  color: #f2f2f4;
 }
 .field {
   display: block;
@@ -429,16 +457,22 @@ export default {
   display: block;
   font-size: 0.85rem;
   margin-bottom: 0.2rem;
+  color: #cbd5e1;
 }
 .field input {
   width: 100%;
   padding: 0.4rem 0.5rem;
   border-radius: 5px;
-  border: 1px solid #ccc;
+  border: 1px solid #3a3a42;
+  background: #0f0f13;
+  color: #e8e8ec;
   box-sizing: border-box;
 }
+.field input::placeholder {
+  color: #6b6b73;
+}
 .field small {
-  color: #888;
+  color: #7d7d85;
   font-size: 0.75rem;
 }
 .modal-actions {
