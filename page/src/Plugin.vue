@@ -29,7 +29,7 @@
         <span class="label">Last set from this plugin</span>
         <span class="value">
           <template v-if="lastKnownState.value">
-            {{ modeLabel(lastKnownState.value) }} — {{ fmtAge(lastKnownState.setAt) }}
+            {{ modeLabel(lastKnownState.value) }} {{ fmtAge(lastKnownState.setAt) }}
           </template>
           <template v-else>—</template>
         </span>
@@ -43,17 +43,13 @@
     <label class="timer-field" v-if="configComplete">
       <span>Auto-revert to Normal after</span>
       <select v-model.number="revertMinutes">
-        <option :value="0">No timer - stays until I clear it</option>
+        <option :value="0">None</option>
         <option :value="5">5 minutes</option>
         <option :value="15">15 minutes</option>
         <option :value="30">30 minutes</option>
         <option :value="60">1 hour</option>
         <option :value="180">3 hours</option>
       </select>
-      <small>Applies to Restarting/Under Maintenance below. Restarting also
-        auto-reverts the moment your site responds again, whichever comes
-        first. Requires the timer to be set up on the maintenance-proxy
-        Worker itself (see README) - otherwise this is silently ignored.</small>
     </label>
 
     <div class="button-row">
@@ -91,7 +87,7 @@
 
         <label class="field">
           <span>Worker Script Name</span>
-          <input v-model="form.scriptName" type="text" placeholder="e.g. maintenance-proxy" />
+          <input v-model="form.scriptName" type="text" placeholder="e.g. breaker-box" />
         </label>
 
         <label class="field">
@@ -114,7 +110,7 @@ const PLUGIN_NAME = "breaker-box";
 const MODE_LABELS = {
   M: "Under Maintenance",
   R: "Restarting",
-  off: "Cleared (auto-detect)",
+  off: "Normal",
 };
 
 export default {
