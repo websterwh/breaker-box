@@ -6,7 +6,8 @@
         <button class="btn" @click="checkSecretExists" :disabled="!configComplete || checking">
           {{ checking ? 'Checking…' : 'Refresh status' }}
         </button>
-        <button class="btn btn-icon" @click="showSettings = true" title="Settings">⚙</button>
+        <button class="btn btn-icon" @click="openMessages" title="Messages" aria-label="Messages">✎</button>
+        <button class="btn btn-icon" @click="openSettings" title="Settings" aria-label="Settings">⚙</button>
       </div>
     </div>
 
@@ -15,8 +16,8 @@
       token, Account ID, and Worker script name.
     </div>
 
-    <div v-if="error" class="banner banner-warn">{{ error }}</div>
-    <div v-if="successMessage" class="banner banner-ok">{{ successMessage }}</div>
+    <div v-if="error" class="banner banner-warn" role="alert">{{ error }}</div>
+    <div v-if="successMessage" class="banner banner-ok" role="status">{{ successMessage }}</div>
 
     <div v-if="configComplete" class="status-card">
       <div class="status-row">
@@ -37,6 +38,10 @@
       <div class="status-row" v-if="lastKnownState.revertAt">
         <span class="label">Auto-reverts</span>
         <span class="value">{{ fmtRevertAt(lastKnownState.revertAt) }}</span>
+      </div>
+      <div class="status-row" v-if="messagesPushedAt">
+        <span class="label">Messages last pushed</span>
+        <span class="value">{{ fmtAge(messagesPushedAt) }}</span>
       </div>
     </div>
 
@@ -64,14 +69,14 @@
       </button>
     </div>
 
-    <div v-if="showSettings" class="modal-backdrop" @click.self="showSettings = false">
-      <div class="modal">
-        <h2>Settings</h2>
+    <div v-if="showSettings" class="modal-backdrop" @click.self="closeModals" @keydown.esc="closeModals">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <h2 id="settings-title">Settings</h2>
 
         <label class="field">
           <span>Proxy Worker URL</span>
-          <input v-model="form.proxyUrl" type="text" placeholder="https://breaker-box-worker.you.workers.dev" />
-          <small>Your deployed breaker-box-worker Worker.</small>
+          <input v-model="form.proxyUrl" type="text" placeholder="https://proxy-worker.you.workers.dev" />
+          <small>Your deployed proxy-worker Worker.</small>
         </label>
 
         <label class="field">
@@ -87,7 +92,8 @@
 
         <label class="field">
           <span>Worker Script Name</span>
-          <input v-model="form.scriptName" type="text" placeholder="e.g. breaker-box" />
+          <input v-model="form.scriptName" type="text" placeholder="e.g. maintenance-worker" />
+          <small>The Worker that reads the MODE secret and serves the page.</small>
         </label>
 
         <label class="field">
@@ -96,8 +102,70 @@
         </label>
 
         <div class="modal-actions">
-          <button class="btn" @click="showSettings = false">Cancel</button>
+          <button class="btn" @click="closeModals">Cancel</button>
           <button class="btn btn-primary" @click="saveSettings">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showMessages" class="modal-backdrop" @click.self="closeModals" @keydown.esc="closeModals">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="messages-title">
+        <h2 id="messages-title">Messages</h2>
+        <p class="modal-intro">
+          Leave a field blank to use the Worker's built-in default. These write to Worker
+          secrets, so they're also editable straight from the Cloudflare dashboard
+          (Worker → Settings → Variables and Secrets) — either place works.
+        </p>
+
+        <div class="msg-group">
+          <h3>Under Maintenance</h3>
+          <label class="field">
+            <span>Title</span>
+            <input v-model="messagesForm.maintTitle" type="text" :placeholder="defaults.maintTitle" />
+          </label>
+          <label class="field">
+            <span>Body</span>
+            <textarea v-model="messagesForm.maintBody" rows="2" :placeholder="defaults.maintBody"></textarea>
+          </label>
+        </div>
+
+        <div class="msg-group">
+          <h3>Restarting</h3>
+          <label class="field">
+            <span>Title</span>
+            <input v-model="messagesForm.restartTitle" type="text" :placeholder="defaults.restartTitle" />
+          </label>
+          <label class="field">
+            <span>Body</span>
+            <textarea v-model="messagesForm.restartBody" rows="2" :placeholder="defaults.restartBody"></textarea>
+          </label>
+        </div>
+
+        <div class="msg-group">
+          <h3>Offline (down &gt; 15 min)</h3>
+          <label class="field">
+            <span>Title</span>
+            <input v-model="messagesForm.offlineTitle" type="text" :placeholder="defaults.offlineTitle" />
+          </label>
+          <label class="field">
+            <span>Body</span>
+            <textarea v-model="messagesForm.offlineBody" rows="2" :placeholder="defaults.offlineBody"></textarea>
+          </label>
+        </div>
+
+        <div class="msg-group">
+          <h3>Footnote</h3>
+          <label class="field">
+            <span>Shown on every page above</span>
+            <input v-model="messagesForm.footnote" type="text" placeholder="(none)" />
+          </label>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn" @click="closeModals">Cancel</button>
+          <button class="btn btn-primary" :disabled="!configComplete || pushingMessages" @click="pushMessages">
+            {{ pushingMessages ? 'Pushing…' : 'Push to Worker' }}
+          </button>
         </div>
       </div>
     </div>
@@ -113,6 +181,31 @@ const MODE_LABELS = {
   off: "Normal",
 };
 
+// Field -> Worker secret name. Matches maintenance-worker/src/index.js's
+// DEFAULT_MESSAGES keys exactly, since these are pushed as secrets with
+// these names.
+const MESSAGE_SECRET_NAMES = {
+  maintTitle: "MAINT_TITLE",
+  maintBody: "MAINT_BODY",
+  restartTitle: "RESTART_TITLE",
+  restartBody: "RESTART_BODY",
+  offlineTitle: "OFFLINE_TITLE",
+  offlineBody: "OFFLINE_BODY",
+  footnote: "FOOTNOTE",
+};
+
+// Mirrors maintenance-worker's DEFAULT_MESSAGES, shown as field placeholders
+// so the settings panel reflects what visitors actually see today.
+const DEFAULT_MESSAGES = {
+  maintTitle: "Under maintenance",
+  maintBody: "This server is offline for scheduled maintenance. It'll be back online shortly.",
+  restartTitle: "Restarting",
+  restartBody: "This server is restarting for a moment. It'll be back online shortly.",
+  offlineTitle: "Device is offline",
+  offlineBody: "This server has been unreachable for a while. Please contact the owner.",
+  footnote: "",
+};
+
 export default {
   name: "BreakerBoxPlugin",
   data() {
@@ -120,19 +213,32 @@ export default {
       apiBase: "/api/v1",
       authToken: null,
       showSettings: false,
+      showMessages: false,
       error: null,
       successMessage: null,
       checking: false,
       busy: null, // 'M' | 'R' | 'off' | null
+      pushingMessages: false,
       secretExists: null, // true | false | null (unknown)
       lastKnownState: { value: null, setAt: null, revertAt: null },
+      messagesPushedAt: null,
       revertMinutes: 0, // 0 = no timer
+      defaults: DEFAULT_MESSAGES,
       form: {
         proxyUrl: "",
         apiToken: "",
         accountId: "",
         scriptName: "",
         secretName: "MODE",
+      },
+      messagesForm: {
+        maintTitle: "",
+        maintBody: "",
+        restartTitle: "",
+        restartBody: "",
+        offlineTitle: "",
+        offlineBody: "",
+        footnote: "",
       },
     };
   },
@@ -144,9 +250,13 @@ export default {
   },
   mounted() {
     this.authToken = this.findAuthToken();
+    document.addEventListener("keydown", this.handleGlobalKeydown);
     this.loadSettings().then(() => {
       if (this.configComplete) this.checkSecretExists();
     });
+  },
+  beforeUnmount() {
+    document.removeEventListener("keydown", this.handleGlobalKeydown);
   },
   methods: {
     modeLabel(v) {
@@ -169,6 +279,23 @@ export default {
       if (mins < 60) return `in ~${mins} min`;
       const hrs = Math.round(mins / 60);
       return `in ~${hrs} hr${hrs === 1 ? "" : "s"}`;
+    },
+    openSettings() {
+      this.showMessages = false;
+      this.showSettings = true;
+    },
+    openMessages() {
+      this.showSettings = false;
+      this.showMessages = true;
+    },
+    closeModals() {
+      this.showSettings = false;
+      this.showMessages = false;
+    },
+    handleGlobalKeydown(e) {
+      if (e.key === "Escape" && (this.showSettings || this.showMessages)) {
+        this.closeModals();
+      }
     },
 
     // --- MOS auth token, same scanning approach as smart-health-dashboard ---
@@ -215,6 +342,8 @@ export default {
         const settings = data?.settings || data || {};
         if (settings.form) this.form = { ...this.form, ...settings.form };
         if (settings.lastKnownState) this.lastKnownState = settings.lastKnownState;
+        if (settings.messagesForm) this.messagesForm = { ...this.messagesForm, ...settings.messagesForm };
+        if (settings.messagesPushedAt) this.messagesPushedAt = settings.messagesPushedAt;
       } catch (e) {
         this.loadLocalSettingsFallback();
       }
@@ -225,7 +354,12 @@ export default {
           method: "POST",
           headers: { ...this.mosAuthHeaders(), "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ form: this.form, lastKnownState: this.lastKnownState }),
+          body: JSON.stringify({
+            form: this.form,
+            lastKnownState: this.lastKnownState,
+            messagesForm: this.messagesForm,
+            messagesPushedAt: this.messagesPushedAt,
+          }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
       } catch (e) {
@@ -239,6 +373,8 @@ export default {
           const parsed = JSON.parse(saved);
           if (parsed.form) this.form = { ...this.form, ...parsed.form };
           if (parsed.lastKnownState) this.lastKnownState = parsed.lastKnownState;
+          if (parsed.messagesForm) this.messagesForm = { ...this.messagesForm, ...parsed.messagesForm };
+          if (parsed.messagesPushedAt) this.messagesPushedAt = parsed.messagesPushedAt;
         }
       } catch (e) {
         // No settings yet - fine, starts empty.
@@ -248,14 +384,19 @@ export default {
       try {
         window.localStorage.setItem(
           "breaker-box-settings",
-          JSON.stringify({ form: this.form, lastKnownState: this.lastKnownState })
+          JSON.stringify({
+            form: this.form,
+            lastKnownState: this.lastKnownState,
+            messagesForm: this.messagesForm,
+            messagesPushedAt: this.messagesPushedAt,
+          })
         );
       } catch (e) {
         // Storage unavailable - settings just won't persist.
       }
     },
     saveSettings() {
-      this.showSettings = false;
+      this.closeModals();
       this.error = null;
       this.saveSettingsToServer();
       if (this.configComplete) this.checkSecretExists();
@@ -350,6 +491,32 @@ export default {
         this.busy = null;
       }
     },
+    // Blank field -> delete the secret, so the Worker falls back to its
+    // built-in default instead of pushing an empty string.
+    async pushMessages() {
+      if (!this.configComplete || this.pushingMessages) return;
+      this.pushingMessages = true;
+      this.error = null;
+      this.successMessage = null;
+      try {
+        for (const [field, secretName] of Object.entries(MESSAGE_SECRET_NAMES)) {
+          const value = (this.messagesForm[field] || "").trim();
+          if (value) {
+            await this.putSecret(secretName, value);
+          } else {
+            await this.deleteSecretIfPresent(secretName);
+          }
+        }
+        this.messagesPushedAt = Date.now();
+        this.saveSettingsToServer();
+        this.successMessage = "Messages pushed to Worker.";
+        this.closeModals();
+      } catch (e) {
+        this.error = `Failed to push messages: ${e.message}`;
+      } finally {
+        this.pushingMessages = false;
+      }
+    },
   },
 };
 </script>
@@ -365,6 +532,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
   margin-bottom: 1rem;
 }
 .toolbar h1 {
@@ -375,6 +543,7 @@ export default {
 .toolbar-right {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 .banner {
   padding: 0.6rem 0.9rem;
@@ -400,6 +569,7 @@ export default {
 .status-row {
   display: flex;
   justify-content: space-between;
+  gap: 1rem;
   padding: 0.25rem 0;
 }
 .status-row .label {
@@ -407,17 +577,14 @@ export default {
 }
 .status-row .value {
   color: #e8e8ec;
-}
-.note {
-  font-size: 0.8rem;
-  color: #7d7d85;
-  margin: 0.5rem 0 0;
+  text-align: right;
 }
 .badge {
   padding: 0.1rem 0.6rem;
   border-radius: 999px;
   font-size: 0.75rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 .badge-set { background: #4c1d1d; color: #fca5a5; }
 .badge-clear { background: #14532d; color: #86efac; }
@@ -435,6 +602,7 @@ export default {
 }
 .timer-field select {
   width: 100%;
+  min-height: 44px;
   padding: 0.4rem 0.5rem;
   border-radius: 5px;
   border: 1px solid #3a3a42;
@@ -457,23 +625,31 @@ export default {
   flex-wrap: wrap;
 }
 .btn {
-  padding: 0.5rem 1rem;
+  min-height: 44px;
+  padding: 0.6rem 1.1rem;
   border-radius: 6px;
   border: 1px solid #3a3a42;
   background: #1f1f24;
   color: #e8e8ec;
   cursor: pointer;
   font-size: 0.9rem;
+  transition: border-color 0.15s ease;
 }
 .btn:not(:disabled):hover {
   border-color: #55555f;
+}
+.btn:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
 }
 .btn:disabled {
   opacity: 0.45;
   cursor: default;
 }
 .btn-icon {
-  padding: 0.4rem 0.6rem;
+  min-width: 44px;
+  padding: 0.5rem 0.7rem;
+  font-size: 1rem;
 }
 .btn-maint {
   background: #78350f;
@@ -504,6 +680,7 @@ export default {
   align-items: center;
   justify-content: center;
   z-index: 50;
+  padding: 1rem;
 }
 .modal {
   background: #18181d;
@@ -511,13 +688,37 @@ export default {
   border: 1px solid #2a2a30;
   padding: 1.25rem 1.5rem;
   border-radius: 10px;
-  width: 90%;
-  max-width: 420px;
+  width: 100%;
+  max-width: 460px;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
 }
 .modal h2 {
   margin-top: 0;
   font-size: 1.1rem;
   color: #f2f2f4;
+}
+.modal-intro {
+  font-size: 0.82rem;
+  color: #9a9aa2;
+  line-height: 1.5;
+  margin: -0.25rem 0 1rem;
+}
+.msg-group {
+  border-top: 1px solid #26262c;
+  padding-top: 0.9rem;
+  margin-top: 0.9rem;
+}
+.msg-group:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+.msg-group h3 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  margin: 0 0 0.6rem;
 }
 .field {
   display: block;
@@ -529,16 +730,30 @@ export default {
   margin-bottom: 0.2rem;
   color: #cbd5e1;
 }
-.field input {
+.field input,
+.field textarea {
   width: 100%;
+  min-height: 44px;
   padding: 0.4rem 0.5rem;
   border-radius: 5px;
   border: 1px solid #3a3a42;
   background: #0f0f13;
   color: #e8e8ec;
   box-sizing: border-box;
+  font-family: inherit;
+  font-size: 0.9rem;
 }
-.field input::placeholder {
+.field textarea {
+  resize: vertical;
+}
+.field input:focus-visible,
+.field textarea:focus-visible,
+.timer-field select:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
+}
+.field input::placeholder,
+.field textarea::placeholder {
   color: #6b6b73;
 }
 .field small {
