@@ -192,6 +192,17 @@ export default {
             return page(await rebootingOrOfflineHtml(caches.default, ctx, msg, env));
         }
 
+        // env.AUTO_FEATURES_ENABLED (optional, set by the plugin's global
+        // "Auto features on" switch) - "0" turns off ALL automatic
+        // behavior, including this Worker's own auto-detect fallback:
+        // with no MODE manually set, requests just pass straight through
+        // with no interception at all, exactly as if this Worker weren't
+        // here. Manual M/R above are never affected by this - only what
+        // happens when nothing's been explicitly set.
+        if (env.AUTO_FEATURES_ENABLED === "0") {
+            return fetch(request);
+        }
+
         return autoDetect(request, env, ctx, msg);
     },
 

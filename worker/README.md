@@ -21,12 +21,23 @@ One Worker, two jobs:
 
 - `MODE` unset — passes requests straight through. If the origin returns
   a 5xx or the request fails, it shows a "Restarting" page for the first
-  15 minutes of an outage, then an "Offline" page after that.
+  15 minutes of an outage, then an "Offline" page after that - unless
+  `AUTO_FEATURES_ENABLED` is `"0"` (see below), in which case it just
+  passes the request straight through with no interception at all.
 - `MODE=M` — always shows the "Under maintenance" page, regardless of
   origin health.
 - `MODE=R` — always shows the "Restarting" page to this visitor, while
   checking the origin in the background so `MODE` clears itself once the
   origin is healthy again.
+
+`AUTO_FEATURES_ENABLED` (optional, set by the plugin's global "Auto
+features on" switch): `"0"` turns off every piece of automatic behavior
+at once - this Worker's own auto-detect fallback above (with no `MODE`
+set, requests pass straight through, exactly as if this Worker weren't
+here on a real outage), plus the background container watcher (see
+[watcher/](../watcher)) and auto-pushing Worker code on plugin updates.
+Manually setting `MODE=M`/`MODE=R` still always works either way - this
+only affects what happens automatically.
 
 ## Deploy your own copy
 

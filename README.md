@@ -50,9 +50,12 @@ plugin and the one Worker it depends on:
    it to one in Settings → **Container to watch**. See
    [worker](./worker#optional-live-container-aware-restart-detection).
 8. The **"Auto features on"** switch near the top of the plugin is a
-   single kill switch for both the background container-watch service
-   and auto-pushing Worker code on update — turn it off to disable both
-   at once and only ever act on the manual buttons/panels.
+   single kill switch for everything automatic at once: the background
+   container-watch service, the Worker's own auto-detect fallback (with
+   no `MODE` manually set, an outage normally shows a "Restarting"/
+   "Offline" page — off, it just passes straight through instead, as if
+   this Worker weren't there), and auto-pushing Worker code on update.
+   Manual buttons and panels keep working either way.
 
 ## Fork this repo
 

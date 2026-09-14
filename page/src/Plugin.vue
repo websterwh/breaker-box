@@ -11,9 +11,15 @@
       </div>
     </div>
 
-    <label class="field-checkbox global-toggle">
-      <input type="checkbox" v-model="form.autoFeaturesEnabled" @change="saveSettingsToServer" />
-      <span>Auto features on (background container watch + auto-push Worker code on update)</span>
+    <label class="global-toggle">
+      <span class="switch">
+        <input type="checkbox" v-model="form.autoFeaturesEnabled" @change="applyAutoFeaturesToggle" />
+        <span class="switch-track"><span class="switch-thumb"></span></span>
+      </span>
+      <span class="global-toggle-text">
+        Auto features on
+        <small>Background container watch, the Worker's automatic Restarting/Offline pages when it's unreachable, and auto-push of Worker code on update. Off means only the manual buttons and panels ever act.</small>
+      </span>
     </label>
 
     <div v-if="!configComplete" class="banner banner-warn">
@@ -672,6 +678,25 @@ export default {
         this.pushingMessages = false;
       }
     },
+    // The global switch controls the watcher (via this settings.json
+    // field, which it reads directly - see watcher/watcher.js) and,
+    // separately, the Worker's own auto-detect fallback (via an actual
+    // Worker secret, since the Worker only ever sees its own env). Both
+    // need updating together whenever this switch changes.
+    async applyAutoFeaturesToggle() {
+      if (this.configComplete) {
+        try {
+          if (this.form.autoFeaturesEnabled) {
+            await this.deleteSecretIfPresent("AUTO_FEATURES_ENABLED");
+          } else {
+            await this.putSecret("AUTO_FEATURES_ENABLED", "0");
+          }
+        } catch (e) {
+          this.error = `Failed to update Worker: ${e.message}`;
+        }
+      }
+      this.saveSettingsToServer();
+    },
     async fetchWorkerSettings() {
       const res = await fetch(`${this.scriptUrl()}/settings`, {
         headers: { Authorization: `Bearer ${this.form.apiToken}` },
@@ -1031,11 +1056,74 @@ export default {
   outline-offset: 1px;
 }
 .global-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   border: 1px solid #2a2a30;
   background: #17171b;
   border-radius: 8px;
-  padding: 0.6rem 0.9rem;
+  padding: 0.7rem 0.9rem;
   margin-bottom: 0.75rem;
+  min-height: 44px;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.global-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.9rem;
+  color: #e8e8ec;
+  font-weight: 600;
+}
+.global-toggle-text small {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #9a9aa2;
+  line-height: 1.4;
+}
+.switch {
+  position: relative;
+  display: inline-flex;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.switch input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.switch-track {
+  position: absolute;
+  inset: 0;
+  background: #71717a;
+  border-radius: 999px;
+  transition: background-color 0.15s ease;
+}
+.switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  background: #ffffff;
+  border-radius: 50%;
+  transition: transform 0.15s ease;
+}
+.switch input:checked ~ .switch-track {
+  background: #16a34a;
+}
+.switch input:checked ~ .switch-track .switch-thumb {
+  transform: translateX(18px);
+}
+.switch input:focus-visible ~ .switch-track {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
 }
 .field-with-button {
   display: flex;
