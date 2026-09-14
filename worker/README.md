@@ -30,7 +30,7 @@ One Worker, two jobs:
 
 ## Deploy your own copy
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/websterwh/breaker-box/tree/main/workers/worker)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/websterwh/breaker-box/tree/main/worker)
 
 After deploying, point this Worker at your real origin (Route or Custom
 Domain, in the Cloudflare dashboard) and note its script name and its

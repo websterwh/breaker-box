@@ -1,13 +1,13 @@
-// Embeds the canonical Worker source (workers/worker/) into the plugin
+// Embeds the canonical Worker source (worker/) into the plugin
 // bundle, so the "Update Worker Code" button can push it without a second
 // copy of the source drifting out of sync. This file is generated -
-// workers/worker/src/index.js remains the single source of truth.
+// worker/src/index.js remains the single source of truth.
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const workerDir = resolve(__dirname, "../../workers/worker");
+const workerDir = resolve(__dirname, "../../worker");
 const outDir = resolve(__dirname, "../src/generated");
 
 const source = readFileSync(resolve(workerDir, "src/index.js"), "utf-8");

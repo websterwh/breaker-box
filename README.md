@@ -10,17 +10,16 @@ Everything lives in this one repo, so forking it is enough to get the
 plugin and the one Worker it depends on:
 
 - **[`page/`](./page)** — the plugin itself (Vue), installed into MOS.
-- **[`workers/worker/`](./workers/worker)** — sits in front of your real
-  origin, reads the `MODE` secret, serves the maintenance / restarting /
-  offline page, and relays the plugin's Cloudflare API calls (since
-  browsers can't call `api.cloudflare.com` directly). One Worker, one
-  deploy.
+- **[`worker/`](./worker)** — sits in front of your real origin, reads
+  the `MODE` secret, serves the maintenance / restarting / offline page,
+  and relays the plugin's Cloudflare API calls (since browsers can't call
+  `api.cloudflare.com` directly). One Worker, one deploy.
 
 ## Setup
 
-1. **Deploy `workers/worker`** in front of whatever origin you want to
-   protect — see [its README](./workers/worker) for the one-click deploy
-   button and message customization options.
+1. **Deploy `worker/`** in front of whatever origin you want to protect
+   — see [its README](./worker) for the one-click deploy button and
+   message customization options.
 2. Install this plugin via the MOS Hub (see the parent Hub repo's README
    for adding a Hub repository).
 3. Open the plugin and click the settings icon. Fill in:
@@ -34,12 +33,12 @@ plugin and the one Worker it depends on:
    set" line only reflects changes made from this plugin).
 5. Use the buttons to set the secret to `M`, `R`, or clear it. Optionally
    open the Messages panel to customize the title/body text shown on each
-   page — see [workers/worker](./workers/worker#customizing-the-messages)
+   page — see [worker](./worker#customizing-the-messages)
    for the full list and defaults.
 6. If you update the plugin later and the Worker's code has also changed,
    use Settings → **Update Worker Code** to push the new bundled code to
    your Worker without copy/pasting it by hand — see
-   [workers/worker](./workers/worker#updating-this-workers-code-from-the-plugin).
+   [worker](./worker#updating-this-workers-code-from-the-plugin).
 
 ## Fork this repo
 

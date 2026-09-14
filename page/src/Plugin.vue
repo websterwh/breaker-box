@@ -202,7 +202,7 @@ const MODE_LABELS = {
   off: "Normal",
 };
 
-// Field -> Worker secret name. Matches workers/worker/src/index.js's
+// Field -> Worker secret name. Matches worker/src/index.js's
 // DEFAULT_MESSAGES keys exactly, since these are pushed as secrets with
 // these names.
 const MESSAGE_SECRET_NAMES = {
