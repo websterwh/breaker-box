@@ -5,11 +5,13 @@
 // Reads the plugin's own settings straight from disk (no MOS API token
 // needed) and polls Docker directly over its local socket (this process
 // runs as root on the same host, so it doesn't need MOS's Docker proxy
-// either). When the configured container starts restarting, it pushes a
-// message override and a MODE=R secret to the Worker through its
-// built-in /__bbproxy relay - the exact same secrets the plugin's manual
-// buttons and Messages panel use - and reverts them once Docker reports
-// the container running again.
+// either). When a container goes from "running" to anything else, it
+// pushes a message override and a MODE=R secret to the Worker through
+// its built-in /__bbproxy relay - the exact same secrets the plugin's
+// manual buttons and Messages panel use - and reverts them once Docker
+// reports the container running again. See the transition-tracking
+// comment further down for why this doesn't just match Docker's literal
+// "restarting" state string.
 //
 // SETTINGS_PATH was found by inspecting a live MOS install
 // (/boot/optional/plugins/<pluginName>/settings.json); MOS doesn't
@@ -62,12 +64,15 @@ function containerName(c) {
 
 // No filter -> every container on the box. With a filter set (the
 // plugin's optional "Container to watch" dropdown), only that one.
-async function restartingContainerNames(filterName) {
+async function currentStates(filterName) {
   const containers = await dockerRequest("/containers/json?all=true");
-  return (containers || [])
-    .filter((c) => c.State === "restarting")
-    .map(containerName)
-    .filter((name) => name && (!filterName || name === filterName));
+  const states = new Map();
+  for (const c of containers || []) {
+    const name = containerName(c);
+    if (!name || (filterName && name !== filterName)) continue;
+    states.set(name, c.State);
+  }
+  return states;
 }
 
 function relayBase(workerUrl) {
@@ -148,6 +153,23 @@ function loadConfig() {
 let overrideActive = false;
 let lastPushedTitle = null;
 let lastSkipReason = null;
+// Per-container tracking. Docker's literal "restarting" state string only
+// applies when a restart POLICY is auto-recovering a crashed container -
+// a manual restart (the MOS "Restart" button, `docker restart`, etc.)
+// just stops and starts it directly, often never reporting "restarting"
+// at all. So instead of matching that one string, this tracks the last
+// seen state per container and treats ANY transition away from "running"
+// as the start of a restart, regardless of what Docker calls the state
+// in between. previousStates seeds on first sight without triggering, so
+// a container that's already stopped when this service starts is never
+// mistaken for "just started restarting".
+const previousStates = new Map(); // name -> last observed state
+const activeRestarts = new Map(); // name -> { startedAt }
+// Give up treating something as "still restarting" after this long and
+// let the Worker's own elapsed-time Offline behavior take back over -
+// otherwise a container that's actually just stopped for good would show
+// "restarting" forever.
+const MAX_RESTART_WAIT_MS = 20 * 60 * 1000;
 
 function titleFor(names) {
   return names.length === 1 ? `${names[0]} is restarting` : `${names.join(", ")} are restarting`;
@@ -204,17 +226,40 @@ async function tick() {
   }
   lastSkipReason = null;
 
-  let restarting;
+  let states;
   try {
-    restarting = await restartingContainerNames(cfg.filterName);
+    states = await currentStates(cfg.filterName);
   } catch (e) {
     log(`Docker check failed: ${e.message}`);
     return;
   }
 
+  const now = Date.now();
+  for (const [name, state] of states) {
+    const prev = previousStates.get(name);
+    if (prev === "running" && state !== "running" && !activeRestarts.has(name)) {
+      activeRestarts.set(name, { startedAt: now });
+      log(`"${name}" stopped running (now "${state}") - treating as a restart`);
+    } else if (activeRestarts.has(name) && state === "running") {
+      activeRestarts.delete(name);
+    }
+    previousStates.set(name, state);
+  }
+  // Containers that disappeared (removed) or have been "restarting" too
+  // long to plausibly still be a real restart - stop tracking them.
+  for (const [name, info] of activeRestarts) {
+    if (!states.has(name)) {
+      activeRestarts.delete(name);
+    } else if (now - info.startedAt > MAX_RESTART_WAIT_MS) {
+      log(`"${name}" has been down for over ${MAX_RESTART_WAIT_MS / 60000} min - giving up, falling back to the Worker's normal Offline handling`);
+      activeRestarts.delete(name);
+    }
+  }
+
+  const restartingNames = [...activeRestarts.keys()];
   try {
-    if (restarting.length > 0) {
-      await updateOverride(cfg, restarting);
+    if (restartingNames.length > 0) {
+      await updateOverride(cfg, restartingNames);
     } else if (overrideActive) {
       await endOverride(cfg);
     }

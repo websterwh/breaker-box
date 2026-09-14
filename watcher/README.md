@@ -39,8 +39,17 @@ Every 10 seconds (only when the plugin's settings have a Worker fully
 configured):
 
 1. Lists every container's live state via `/containers/json` on Docker's
-   local socket, and finds the ones currently `"restarting"` - all of
-   them, unless a specific container is selected in the plugin's Settings.
+   local socket - all of them, unless a specific container is selected in
+   the plugin's Settings - and tracks each one's state from tick to tick.
+   Any container going from `"running"` to anything else counts as
+   restarting, not just the literal `"restarting"` state: that state only
+   applies when a restart *policy* is auto-recovering a crashed
+   container, and a manual restart (MOS's own Restart button, `docker
+   restart`, etc.) just stops and starts it directly, usually without
+   Docker ever reporting `"restarting"` at all. A container already
+   stopped when this service starts is never mistaken for one that just
+   started restarting, since there's no prior "running" observation to
+   compare against.
 2. If any are restarting: pushes `RESTART_TITLE` naming them (e.g. "plex
    is restarting", or "plex, sonarr are restarting" if more than one is
    restarting at once), sets the `MODE` secret to `R`, and pushes a
@@ -55,6 +64,11 @@ configured):
 3. Once none are restarting: reverts `RESTART_TITLE` to whatever you've
    set in the plugin's Messages panel (or the Worker's default if you
    haven't), clears `MODE`, and removes `CONTAINER_WATCH_AT`.
+4. If a container's been "restarting" for more than 20 minutes straight,
+   it's probably not actually coming back - the watcher stops treating it
+   as one and lets the Worker's own elapsed-time Offline behavior take
+   over, rather than showing "restarting" forever for something that's
+   really just stopped.
 
 If the Worker connection settings are incomplete, it just stays idle -
 the same as before this feature existed. A single Worker only fronts one
