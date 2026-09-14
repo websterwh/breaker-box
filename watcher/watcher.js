@@ -56,11 +56,18 @@ function dockerRequest(path) {
   });
 }
 
-async function findContainer(name) {
+function containerName(c) {
+  return c.Names && c.Names[0] ? c.Names[0].replace(/^\//, "") : null;
+}
+
+// No filter -> every container on the box. With a filter set (the
+// plugin's optional "Container to watch" dropdown), only that one.
+async function restartingContainerNames(filterName) {
   const containers = await dockerRequest("/containers/json?all=true");
-  return (containers || []).find(
-    (c) => c.Names && c.Names.some((n) => n.replace(/^\//, "") === name)
-  );
+  return (containers || [])
+    .filter((c) => c.State === "restarting")
+    .map(containerName)
+    .filter((name) => name && (!filterName || name === filterName));
 }
 
 function relayBase(workerUrl) {
@@ -122,7 +129,7 @@ async function deleteSecretIfPresent(cfg, name) {
 function loadConfig() {
   const settings = readSettings();
   const form = settings.form || {};
-  if (!form.workerUrl || !form.apiToken || !form.accountId || !form.scriptName || !form.containerName) {
+  if (!form.workerUrl || !form.apiToken || !form.accountId || !form.scriptName) {
     return null;
   }
   return {
@@ -131,29 +138,40 @@ function loadConfig() {
     accountId: form.accountId,
     scriptName: form.scriptName,
     secretName: form.secretName || "MODE",
-    containerName: form.containerName,
+    // Optional: if set, only this one container is watched. Left blank
+    // (the common case), every container on the box is watched.
+    filterName: form.containerName || null,
     normalRestartTitle: (settings.messagesForm && settings.messagesForm.restartTitle) || "",
   };
 }
 
-let lastDockerState = null;
 let overrideActive = false;
+let lastPushedTitle = null;
 let lastSkipReason = null;
 
-async function beginOverride(cfg) {
-  log(`"${cfg.containerName}" is restarting - overriding Worker`);
-  await putSecret(cfg, "RESTART_TITLE", `${cfg.containerName} is restarting`);
-  await putSecret(cfg, cfg.secretName, "R");
+function titleFor(names) {
+  return names.length === 1 ? `${names[0]} is restarting` : `${names.join(", ")} are restarting`;
+}
+
+// Called every tick while at least one container is restarting. Only
+// re-pushes RESTART_TITLE/MODE when the set of restarting containers
+// actually changed, since those rarely change tick to tick - but
+// CONTAINER_WATCH_AT always refreshes, since that's what tells the
+// Worker this is still a live, current signal (see worker/README.md).
+async function updateOverride(cfg, names) {
+  const title = titleFor(names);
+  if (title !== lastPushedTitle) {
+    log(`Restarting: ${names.join(", ")} - overriding Worker`);
+    await putSecret(cfg, "RESTART_TITLE", title);
+    await putSecret(cfg, cfg.secretName, "R");
+    lastPushedTitle = title;
+  }
   await putSecret(cfg, "CONTAINER_WATCH_AT", String(Date.now()));
   overrideActive = true;
 }
 
-async function refreshOverride(cfg) {
-  await putSecret(cfg, "CONTAINER_WATCH_AT", String(Date.now()));
-}
-
 async function endOverride(cfg) {
-  log(`"${cfg.containerName}" is running again - reverting Worker override`);
+  log("No containers restarting - reverting Worker override");
   if (cfg.normalRestartTitle.trim()) {
     await putSecret(cfg, "RESTART_TITLE", cfg.normalRestartTitle.trim());
   } else {
@@ -163,6 +181,7 @@ async function endOverride(cfg) {
   await deleteSecretIfPresent(cfg, `${cfg.secretName}_REVERT_AT`);
   await deleteSecretIfPresent(cfg, "CONTAINER_WATCH_AT");
   overrideActive = false;
+  lastPushedTitle = null;
 }
 
 async function tick() {
@@ -178,35 +197,25 @@ async function tick() {
   }
   if (!cfg) {
     if (lastSkipReason !== "incomplete") {
-      log("Watch not configured (no container selected, or Worker settings incomplete) - idle");
+      log("Watch not configured (Worker settings incomplete) - idle");
       lastSkipReason = "incomplete";
     }
     return;
   }
   lastSkipReason = null;
 
-  let container;
+  let restarting;
   try {
-    container = await findContainer(cfg.containerName);
+    restarting = await restartingContainerNames(cfg.filterName);
   } catch (e) {
     log(`Docker check failed: ${e.message}`);
     return;
   }
-  if (!container) {
-    log(`Container "${cfg.containerName}" not found`);
-    return;
-  }
-
-  const state = container.State; // "running" | "restarting" | "exited" | ...
-  const wasRestarting = lastDockerState === "restarting";
-  lastDockerState = state;
 
   try {
-    if (state === "restarting" && !wasRestarting) {
-      await beginOverride(cfg);
-    } else if (state === "restarting" && wasRestarting) {
-      await refreshOverride(cfg);
-    } else if (state === "running" && (wasRestarting || overrideActive)) {
+    if (restarting.length > 0) {
+      await updateOverride(cfg, restarting);
+    } else if (overrideActive) {
       await endOverride(cfg);
     }
   } catch (e) {

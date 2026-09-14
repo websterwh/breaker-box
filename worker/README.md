@@ -69,14 +69,15 @@ confirm with "Refresh status" afterward the first time you use it.
 
 ## Optional: live container-aware restart detection
 
-If you set a "Container to watch" in the plugin's Settings,
 [`watcher/`](../watcher) - a small background service installed
 alongside the plugin, running on your MOS host independent of any
-browser tab - polls that container every ~10 seconds (this Worker runs
-on Cloudflare's edge and has no way to reach your LAN's Docker socket on
-its own, which is why this piece runs locally instead). When it sees the
-container actually restarting, it pushes `RESTART_TITLE` with the real
-container name and a `CONTAINER_WATCH_AT` timestamp to this Worker; while
+browser tab - polls every container on the host every ~10 seconds (this
+Worker runs on Cloudflare's edge and has no way to reach your LAN's
+Docker socket on its own, which is why this piece runs locally instead).
+Optionally restrict it to one container via the plugin's Settings. When
+it sees a container actually restarting, it pushes `RESTART_TITLE` with
+the real container name(s) and a `CONTAINER_WATCH_AT` timestamp to this
+Worker; while
 that timestamp stays fresh (refreshed every poll while still restarting),
 this Worker keeps showing "Restarting" instead of switching to "Offline"
 after 15 minutes, since a live signal is confirming the restart is still

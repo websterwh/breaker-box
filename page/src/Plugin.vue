@@ -43,9 +43,9 @@
         <span class="label">Messages last pushed</span>
         <span class="value">{{ fmtAge(messagesPushedAt) }}</span>
       </div>
-      <div class="status-row" v-if="form.containerName">
-        <span class="label">Watching container</span>
-        <span class="value">{{ form.containerName }} (background service)</span>
+      <div class="status-row">
+        <span class="label">Watching containers</span>
+        <span class="value">{{ form.containerName || 'All containers' }} (background service)</span>
       </div>
     </div>
 
@@ -112,13 +112,13 @@
         <div class="msg-group">
           <h3>Container watch (optional)</h3>
           <p class="modal-intro">
-            Pick the Docker container behind this Worker. A background service
-            (installed alongside this plugin, runs independently of this browser tab)
-            checks it every few seconds — when it sees the container actually
-            restarting, it shows the real container name instead of a generic message
-            and keeps showing "Restarting" for as long as the restart is confirmed
-            still happening, not just for a fixed 15 minutes. Leave this blank to skip
-            the feature entirely. See
+            A background service (installed alongside this plugin, runs independently
+            of this browser tab) watches your Docker containers every few seconds —
+            when it sees one actually restarting, it shows the real container name(s)
+            instead of a generic message and keeps showing "Restarting" for as long as
+            a restart is confirmed still happening, not just for a fixed 15 minutes.
+            By default it watches every container on this host; pick one below to
+            restrict it to just that container instead. See
             <a href="https://github.com/websterwh/breaker-box/tree/main/watcher" target="_blank" rel="noopener">watcher/README.md</a>
             for how it works and its logs.
           </p>
@@ -126,7 +126,7 @@
             <span>Container to watch</span>
             <div class="field-with-button">
               <select v-model="form.containerName">
-                <option value="">None</option>
+                <option value="">All containers</option>
                 <option v-for="name in containerOptions" :key="name" :value="name">{{ name }}</option>
               </select>
               <button type="button" class="btn" :disabled="loadingContainers" @click="loadContainerOptions">

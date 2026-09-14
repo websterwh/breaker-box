@@ -42,11 +42,12 @@ plugin and the one Worker it depends on:
    use Settings → **Update Worker Code** to push the new bundled code to
    your Worker without copy/pasting it by hand — see
    [worker](./worker#updating-this-workers-code-from-the-plugin).
-7. Optionally pick a **Container to watch** in Settings so a real Docker
-   restart shows the container's own name instead of a generic message.
-   This is handled by a small background service
-   ([`watcher/`](./watcher)) the plugin's package installs and runs on
-   your MOS host, independent of any browser tab — see
+7. A real Docker restart on this host will automatically show the
+   container's own name instead of a generic message — handled by a
+   small background service ([`watcher/`](./watcher)) the plugin's
+   package installs and runs on your MOS host, independent of any
+   browser tab. Watches every container by default; optionally restrict
+   it to one in Settings → **Container to watch**. See
    [worker](./worker#optional-live-container-aware-restart-detection).
 
 ## Fork this repo

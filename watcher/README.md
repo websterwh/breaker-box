@@ -1,9 +1,11 @@
 # breaker-box-watcher
 
 A small background service, installed by the plugin's `.deb` package,
-that watches one Docker container and updates a Breaker Box Worker's
-`MODE`/message secrets when it restarts - **independent of any browser
-tab**, unlike checking from the plugin's page directly.
+that watches your Docker containers and updates a Breaker Box Worker's
+`MODE`/message secrets when one restarts - **independent of any browser
+tab**, unlike checking from the plugin's page directly. By default it
+watches every container on the host; the plugin's Settings has an
+optional dropdown to restrict it to just one.
 
 It's a single dependency-free Node script (`watcher.js`) run via a
 standard LSB init.d script (`breaker-box-watcher.init`, modeled on MOS's
@@ -34,25 +36,32 @@ host.
 ## What it does
 
 Every 10 seconds (only when the plugin's settings have a Worker fully
-configured and a "Container to watch" selected):
+configured):
 
-1. Checks the named container's live state via `/containers/json` on
-   Docker's local socket.
-2. On seeing it enter `"restarting"`: pushes `RESTART_TITLE` with the
-   real container name, sets the `MODE` secret to `R`, and pushes a
+1. Lists every container's live state via `/containers/json` on Docker's
+   local socket, and finds the ones currently `"restarting"` - all of
+   them, unless a specific container is selected in the plugin's Settings.
+2. If any are restarting: pushes `RESTART_TITLE` naming them (e.g. "plex
+   is restarting", or "plex, sonarr are restarting" if more than one is
+   restarting at once), sets the `MODE` secret to `R`, and pushes a
    `CONTAINER_WATCH_AT` timestamp - all through the Worker's built-in
    `/__bbproxy` relay, using the same Cloudflare API token you entered in
-   the plugin.
-3. While still restarting: refreshes `CONTAINER_WATCH_AT` each cycle -
-   see [worker/README.md](../worker#optional-live-container-aware-restart-detection)
-   for what the Worker does with that.
-4. Once Docker reports it `"running"` again: reverts `RESTART_TITLE` to
-   whatever you've set in the plugin's Messages panel (or the Worker's
-   default if you haven't), clears `MODE`, and removes
-   `CONTAINER_WATCH_AT`.
+   the plugin. `RESTART_TITLE`/`MODE` are only re-pushed when the set of
+   restarting containers actually changes; `CONTAINER_WATCH_AT` refreshes
+   every cycle regardless, since that's what tells the Worker this is
+   still a live, current signal - see
+   [worker/README.md](../worker#optional-live-container-aware-restart-detection)
+   for what it does with that.
+3. Once none are restarting: reverts `RESTART_TITLE` to whatever you've
+   set in the plugin's Messages panel (or the Worker's default if you
+   haven't), clears `MODE`, and removes `CONTAINER_WATCH_AT`.
 
-If the container isn't selected, or the Worker connection settings are
-incomplete, it just stays idle - the same as before this feature existed.
+If the Worker connection settings are incomplete, it just stays idle -
+the same as before this feature existed. A single Worker only fronts one
+site, so all watched containers share that one Worker's `MODE`/messages -
+if you run separate Workers for separate sites, each needs its own
+plugin settings (and this watcher reads only one settings file, so
+multi-Worker setups aren't covered by a single install of this service).
 
 ## Logs
 
