@@ -88,8 +88,11 @@ configured:
    over, rather than showing "restarting" forever for something that's
    really just stopped.
 
-If the Worker connection settings are incomplete, it just stays idle -
-the same as before this feature existed. A single Worker only fronts one
+If the Worker connection settings are incomplete, or the plugin's
+"Auto features on" switch is turned off, it just stays idle. Getting
+switched off mid-restart cleanly reverts whatever it had already pushed
+first, rather than leaving `MODE` stuck on `R` and going quiet. A single
+Worker only fronts one
 site, so all watched containers share that one Worker's `MODE`/messages -
 if you run separate Workers for separate sites, each needs its own
 plugin settings (and this watcher reads only one settings file, so

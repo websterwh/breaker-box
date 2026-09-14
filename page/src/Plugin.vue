@@ -11,6 +11,11 @@
       </div>
     </div>
 
+    <label class="field-checkbox global-toggle">
+      <input type="checkbox" v-model="form.autoFeaturesEnabled" @change="saveSettingsToServer" />
+      <span>Auto features on (background container watch + auto-push Worker code on update)</span>
+    </label>
+
     <div v-if="!configComplete" class="banner banner-warn">
       Not configured yet. Open Settings (⚙) and fill in your Worker URL, Cloudflare API
       token, Account ID, and Worker script name.
@@ -310,6 +315,13 @@ export default {
         secretName: "MODE",
         containerName: "",
         autoPushCode: true,
+        // Master switch for both the background container-watch service
+        // and the auto-push-on-update behavior below. Off means: the
+        // watcher (watcher.js, reading this same settings.json) goes
+        // fully idle regardless of container selection, and this plugin
+        // never auto-pushes code on mount - manual buttons (the M/R/off
+        // row, Push to Worker, Update Worker Code) still work either way.
+        autoFeaturesEnabled: true,
       },
       lastPushedWorkerHash: null,
       containerOptions: [],
@@ -348,11 +360,17 @@ export default {
     document.addEventListener("keydown", this.handleGlobalKeydown);
     this.loadSettings().then(() => {
       if (this.configComplete) this.checkSecretExists();
-      // Auto-push: only when enabled, connection settings are filled in,
+      // Auto-push: only when the global auto-features switch and the
+      // auto-push toggle are both on, connection settings are filled in,
       // and this build's Worker source actually differs from what was
       // last pushed - otherwise every normal page load would re-PUT the
       // same code to Cloudflare for no reason.
-      if (this.configComplete && this.form.autoPushCode && this.lastPushedWorkerHash !== WORKER_SOURCE_HASH) {
+      if (
+        this.configComplete &&
+        this.form.autoFeaturesEnabled &&
+        this.form.autoPushCode &&
+        this.lastPushedWorkerHash !== WORKER_SOURCE_HASH
+      ) {
         this.pushWorkerCode();
       }
     });
@@ -1011,6 +1029,13 @@ export default {
 .field-checkbox input:focus-visible {
   outline: 2px solid #60a5fa;
   outline-offset: 1px;
+}
+.global-toggle {
+  border: 1px solid #2a2a30;
+  background: #17171b;
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 0.75rem;
 }
 .field-with-button {
   display: flex;

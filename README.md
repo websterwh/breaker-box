@@ -49,6 +49,10 @@ plugin and the one Worker it depends on:
    browser tab. Watches every container by default; optionally restrict
    it to one in Settings → **Container to watch**. See
    [worker](./worker#optional-live-container-aware-restart-detection).
+8. The **"Auto features on"** switch near the top of the plugin is a
+   single kill switch for both the background container-watch service
+   and auto-pushing Worker code on update — turn it off to disable both
+   at once and only ever act on the manual buttons/panels.
 
 ## Fork this repo
 

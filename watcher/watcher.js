@@ -168,6 +168,12 @@ async function deleteSecretIfPresent(cfg, name) {
   await cfRequest(cfg, "DELETE", `${scriptSecretsPath(cfg)}/${name}`);
 }
 
+// Returns null if the connection settings are incomplete, otherwise a
+// config object with `disabled` reflecting the plugin's global "Auto
+// features" switch - still returned with real values even when
+// disabled, so a restart that was already in progress when the switch
+// gets flipped off can still be cleanly reverted instead of abandoned
+// mid-override.
 function loadConfig() {
   const settings = readSettings();
   const form = settings.form || {};
@@ -175,6 +181,7 @@ function loadConfig() {
     return null;
   }
   return {
+    disabled: form.autoFeaturesEnabled === false,
     workerUrl: form.workerUrl,
     apiToken: form.apiToken,
     accountId: form.accountId,
@@ -281,6 +288,24 @@ async function tickImpl() {
     if (lastSkipReason !== "settings") {
       log(`Couldn't read settings (${e.message}) - waiting for the plugin to save valid settings`);
       lastSkipReason = "settings";
+    }
+    return;
+  }
+  if (cfg && cfg.disabled) {
+    if (overrideActive) {
+      // Got switched off mid-restart - clean up rather than leaving MODE
+      // stuck on R indefinitely.
+      try {
+        await endOverride(cfg);
+      } catch (e) {
+        log(`Failed to revert Worker before going idle: ${e.message}`);
+      }
+      activeRestarts.clear();
+      previousStates.clear();
+    }
+    if (lastSkipReason !== "disabled") {
+      log('"Auto features" is turned off in the plugin - idle');
+      lastSkipReason = "disabled";
     }
     return;
   }
