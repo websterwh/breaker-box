@@ -206,7 +206,23 @@ async function endOverride(cfg) {
   lastPushedTitle = null;
 }
 
+// Guards against overlapping runs when several Docker events arrive in
+// quick succession - an overlapping call would just re-read the same
+// container list anyway, so skipping it loses nothing, and it avoids two
+// concurrent runs racing on the shared Maps below.
+let tickInFlight = false;
+
 async function tick() {
+  if (tickInFlight) return;
+  tickInFlight = true;
+  try {
+    await tickImpl();
+  } finally {
+    tickInFlight = false;
+  }
+}
+
+async function tickImpl() {
   let cfg;
   try {
     cfg = loadConfig();
@@ -268,8 +284,51 @@ async function tick() {
   }
 }
 
+// Docker's own event stream, not just the periodic tick() below: a
+// container can go running -> exited -> running entirely between two
+// polls on a fast restart, and polling would just see "running" both
+// times and miss it completely. Subscribing to Docker's /events endpoint
+// reacts the instant a container actually stops or starts, with no
+// sampling gap. tick() (the periodic timer, kept as a safety net for
+// missed/reconnecting events and to keep CONTAINER_WATCH_AT fresh) does
+// the same work either way, so this just calls it early on the events
+// that matter.
+function watchDockerEvents() {
+  const filters = encodeURIComponent(JSON.stringify({ type: ["container"], event: ["start", "die"] }));
+  const req = http.request(
+    { socketPath: DOCKER_SOCKET, path: `/events?filters=${filters}`, method: "GET" },
+    (res) => {
+      log("Connected to Docker's event stream");
+      let buffer = "";
+      res.on("data", (chunk) => {
+        buffer += chunk.toString();
+        let idx;
+        while ((idx = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (line) tick();
+        }
+      });
+      res.on("end", () => {
+        log("Docker event stream ended - reconnecting in 5s");
+        setTimeout(watchDockerEvents, 5000);
+      });
+      res.on("error", (e) => {
+        log(`Docker event stream error (${e.message}) - reconnecting in 5s`);
+        setTimeout(watchDockerEvents, 5000);
+      });
+    }
+  );
+  req.on("error", (e) => {
+    log(`Couldn't connect to Docker's event stream (${e.message}) - retrying in 5s. Falls back to the ${POLL_MS / 1000}s poll in the meantime.`);
+    setTimeout(watchDockerEvents, 5000);
+  });
+  req.end();
+}
+
 log("Breaker Box container watcher starting");
 tick();
+watchDockerEvents();
 const timer = setInterval(tick, POLL_MS);
 
 process.on("SIGTERM", () => {

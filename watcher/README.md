@@ -35,8 +35,14 @@ host.
 
 ## What it does
 
-Every 10 seconds (only when the plugin's settings have a Worker fully
-configured):
+Reacts to Docker's own event stream (`/events` on Docker's local socket)
+the instant a container actually stops or starts - not on a delay. A
+fast restart can complete entirely between two samples of a periodic
+poll, so events are the primary trigger; a 10-second poll runs alongside
+purely as a safety net (reconnecting the event stream if it drops,
+catching anything missed, and refreshing `CONTAINER_WATCH_AT` even when
+nothing's changing). Only when the plugin's settings have a Worker fully
+configured:
 
 1. Lists every container's live state via `/containers/json` on Docker's
    local socket - all of them, unless a specific container is selected in
