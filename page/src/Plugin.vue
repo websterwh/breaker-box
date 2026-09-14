@@ -93,7 +93,11 @@
         <label class="field">
           <span>Worker Script Name</span>
           <input v-model="form.scriptName" type="text" placeholder="e.g. breaker-box-worker" />
-          <small>The Worker's script name, as shown in the Cloudflare dashboard.</small>
+          <small>
+            Auto-filled from the Worker URL above when it's a *.workers.dev address.
+            Using a custom domain instead? Enter the script name yourself — it's shown
+            in the Cloudflare dashboard next to your Worker.
+          </small>
         </label>
 
         <label class="field">
@@ -271,6 +275,17 @@ export default {
       return !!(f.workerUrl && f.apiToken && f.accountId && f.scriptName && f.secretName);
     },
   },
+  watch: {
+    "form.workerUrl"(newUrl) {
+      // Only for the default *.workers.dev URL, where the first hostname
+      // label really is the script name - a custom domain reveals nothing
+      // about the underlying script, so don't guess there. Never overwrite
+      // a name the user already entered.
+      if (this.form.scriptName) return;
+      const guess = this.guessScriptName(newUrl);
+      if (guess) this.form.scriptName = guess;
+    },
+  },
   mounted() {
     this.authToken = this.findAuthToken();
     document.addEventListener("keydown", this.handleGlobalKeydown);
@@ -302,6 +317,15 @@ export default {
       if (mins < 60) return `in ~${mins} min`;
       const hrs = Math.round(mins / 60);
       return `in ~${hrs} hr${hrs === 1 ? "" : "s"}`;
+    },
+    guessScriptName(url) {
+      try {
+        const host = new URL(url).hostname;
+        const m = host.match(/^([a-z0-9-]+)\.[a-z0-9-]+\.workers\.dev$/i);
+        return m ? m[1] : null;
+      } catch (e) {
+        return null;
+      }
     },
     openSettings() {
       this.showMessages = false;
