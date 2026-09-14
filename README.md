@@ -39,6 +39,10 @@ plugin and the one Worker it depends on:
    use Settings → **Update Worker Code** to push the new bundled code to
    your Worker without copy/pasting it by hand — see
    [worker](./worker#updating-this-workers-code-from-the-plugin).
+7. Optionally pick a **Container to watch** in Settings so a real Docker
+   restart shows the container's own name instead of a generic message,
+   for as long as this browser tab stays open — see
+   [worker](./worker#optional-live-container-aware-restart-detection).
 
 ## Fork this repo
 

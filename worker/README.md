@@ -51,8 +51,10 @@ built-in relay:
 | `MAINT_BODY`    | `MODE=M`                | This server is offline for scheduled maintenance. It'll be back online shortly. |
 | `RESTART_TITLE` | `MODE=R` or auto-detect | Restarting                                                             |
 | `RESTART_BODY`  | `MODE=R` or auto-detect | This server is restarting for a moment. It'll be back online shortly.  |
-| `OFFLINE_TITLE` | down > 15 min           | Device is offline                                                      |
-| `OFFLINE_BODY`  | down > 15 min           | This server has been unreachable for a while. Please contact the owner. |
+| `OFFLINE_TITLE` | down > 15 min\*         | Device is offline                                                      |
+| `OFFLINE_BODY`  | down > 15 min\*         | This server has been unreachable for a while. Please contact the owner. |
+
+\* extended automatically while a live container-watch signal confirms it's still genuinely restarting — see below.
 | `FOOTNOTE`      | every page above        | (none)                                                                 |
 
 ## Updating this Worker's code from the plugin
@@ -64,6 +66,22 @@ the plugin updates. Before overwriting the script, it reads back your
 current bindings (secrets, vars) and re-submits them unchanged alongside
 the new code — existing secrets are not expected to be affected, but
 confirm with "Refresh status" afterward the first time you use it.
+
+## Optional: live container-aware restart detection
+
+If you set a "Container to watch" in the plugin's Settings, the plugin
+polls MOS's Docker API for that container every ~10 seconds **while its
+browser tab stays open** (this Worker runs on Cloudflare's edge and has
+no way to reach your LAN's Docker socket on its own, so this only works
+from the browser side). When it sees the container actually restarting,
+it pushes `RESTART_TITLE` with the real container name and a
+`CONTAINER_WATCH_AT` timestamp to this Worker; while that timestamp stays
+fresh (refreshed every poll while still restarting), this Worker keeps
+showing "Restarting" instead of switching to "Offline" after 15 minutes,
+since a live signal is confirming the restart is still genuinely
+happening. If the tab closes or the container is confirmed no longer
+restarting, everything reverts to your normal messages and the ordinary
+elapsed-time behavior above.
 
 ## Optional: self-clearing timer
 

@@ -1,5 +1,12 @@
 const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 
+// How long a CONTAINER_WATCH_AT timestamp (pushed by the plugin's live
+// container poller, see beginContainerRestartOverride in Plugin.vue) is
+// trusted as "still restarting right now" before falling back to the
+// elapsed-time heuristic below. Set generously above the plugin's 10s
+// poll interval so a couple of missed ticks don't flip to Offline early.
+const CONTAINER_WATCH_FRESHNESS_MS = 30 * 1000;
+
 // Synthetic cache key - Cache API is free with no per-op quota (unlike KV)
 // and, unlike a plain in-memory variable, survives the Worker isolate being
 // recycled between requests. Used only for the "how long has this been
@@ -182,7 +189,7 @@ export default {
         // response.
         if (mode === "R") {
             ctx.waitUntil(checkOriginAndMaybeClear(request, env));
-            return page(await rebootingOrOfflineHtml(caches.default, ctx, msg));
+            return page(await rebootingOrOfflineHtml(caches.default, ctx, msg, env));
         }
 
         return autoDetect(request, env, ctx, msg);
@@ -217,11 +224,19 @@ async function autoDetect(request, env, ctx, msg) {
         ctx.waitUntil(caches.default.delete(CACHE_KEY));
         return resp;
     } catch (e) {
-        return page(await rebootingOrOfflineHtml(caches.default, ctx, msg || messages(env)));
+        return page(await rebootingOrOfflineHtml(caches.default, ctx, msg || messages(env), env));
     }
 }
 
-async function rebootingOrOfflineHtml(cache, ctx, msg) {
+// env.CONTAINER_WATCH_AT (optional) is pushed and refreshed by the
+// plugin's live container poller while it has confirmed - via Docker's
+// own state, not a guess - that the container behind this Worker is
+// actively restarting right now. As long as that signal is fresh, keep
+// showing "Restarting" past the elapsed-time cutoff below instead of
+// flipping to "Offline" out from under a restart that's just taking a
+// while. If the signal is stale or was never set, fall back to the
+// original elapsed-time heuristic exactly as before.
+async function rebootingOrOfflineHtml(cache, ctx, msg, env) {
     let downSince;
     const cached = await cache.match(CACHE_KEY);
 
@@ -236,7 +251,10 @@ async function rebootingOrOfflineHtml(cache, ctx, msg) {
     }
 
     const elapsed = Date.now() - downSince;
-    if (elapsed >= FIFTEEN_MIN_MS) {
+    const watchAt = env && env.CONTAINER_WATCH_AT ? parseInt(env.CONTAINER_WATCH_AT, 10) : NaN;
+    const watchIsFresh = !isNaN(watchAt) && Date.now() - watchAt < CONTAINER_WATCH_FRESHNESS_MS;
+
+    if (elapsed >= FIFTEEN_MIN_MS && !watchIsFresh) {
         return shell(msg.FOOTNOTE, `
             <div class="dot" aria-hidden="true">!</div>
             <h1>${escapeHtml(msg.OFFLINE_TITLE)}</h1>
