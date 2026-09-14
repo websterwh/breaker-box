@@ -239,6 +239,8 @@ export default {
       authToken: null,
       showSettings: false,
       showMessages: false,
+      formSnapshot: null,
+      messagesFormSnapshot: null,
       error: null,
       successMessage: null,
       checking: false,
@@ -329,13 +331,23 @@ export default {
     },
     openSettings() {
       this.showMessages = false;
+      this.formSnapshot = { ...this.form };
       this.showSettings = true;
     },
     openMessages() {
       this.showSettings = false;
+      this.messagesFormSnapshot = { ...this.messagesForm };
       this.showMessages = true;
     },
+    // Cancel, Escape, and clicking the backdrop all discard unsaved edits -
+    // only Save/Push commit them. Without restoring the snapshot here,
+    // "Cancel" would just skip the network write while leaving the edited
+    // values sitting in the form, which looks like it saved when it didn't.
     closeModals() {
+      if (this.showSettings && this.formSnapshot) this.form = this.formSnapshot;
+      if (this.showMessages && this.messagesFormSnapshot) this.messagesForm = this.messagesFormSnapshot;
+      this.formSnapshot = null;
+      this.messagesFormSnapshot = null;
       this.showSettings = false;
       this.showMessages = false;
     },
@@ -447,7 +459,8 @@ export default {
       }
     },
     saveSettings() {
-      this.closeModals();
+      this.formSnapshot = null;
+      this.showSettings = false;
       this.error = null;
       this.saveSettingsToServer();
       if (this.configComplete) this.checkSecretExists();
@@ -566,7 +579,8 @@ export default {
         this.messagesPushedAt = Date.now();
         this.saveSettingsToServer();
         this.successMessage = "Messages pushed to Worker.";
-        this.closeModals();
+        this.messagesFormSnapshot = null;
+        this.showMessages = false;
       } catch (e) {
         this.error = `Failed to push messages: ${e.message}`;
       } finally {
