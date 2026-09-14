@@ -14,6 +14,9 @@ plugin and the one Worker it depends on:
   the `MODE` secret, serves the maintenance / restarting / offline page,
   and relays the plugin's Cloudflare API calls (since browsers can't call
   `api.cloudflare.com` directly). One Worker, one deploy.
+- **[`watcher/`](./watcher)** — a small background service the plugin's
+  package installs on your MOS host, for the optional container-aware
+  restart detection below. Runs independently of any browser tab.
 
 ## Setup
 
@@ -40,8 +43,10 @@ plugin and the one Worker it depends on:
    your Worker without copy/pasting it by hand — see
    [worker](./worker#updating-this-workers-code-from-the-plugin).
 7. Optionally pick a **Container to watch** in Settings so a real Docker
-   restart shows the container's own name instead of a generic message,
-   for as long as this browser tab stays open — see
+   restart shows the container's own name instead of a generic message.
+   This is handled by a small background service
+   ([`watcher/`](./watcher)) the plugin's package installs and runs on
+   your MOS host, independent of any browser tab — see
    [worker](./worker#optional-live-container-aware-restart-detection).
 
 ## Fork this repo

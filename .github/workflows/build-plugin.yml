@@ -44,12 +44,17 @@ jobs:
 
           for ARCH in amd64 arm64; do
             PKGDIR="pkg-$ARCH"
-            mkdir -p "$PKGDIR/DEBIAN" "$PKGDIR/var/www/mos-plugins/breaker-box"
+            mkdir -p "$PKGDIR/DEBIAN" "$PKGDIR/var/www/mos-plugins/breaker-box" \
+              "$PKGDIR/usr/local/lib/breaker-box-watcher" "$PKGDIR/etc/init.d"
 
             cp page/dist/remoteEntry.js "$PKGDIR/var/www/mos-plugins/breaker-box/"
             cp page/dist/manifest.json "$PKGDIR/var/www/mos-plugins/breaker-box/"
             cp page/dist/style.css "$PKGDIR/var/www/mos-plugins/breaker-box/"
             cp page/dist/__federation_*.js "$PKGDIR/var/www/mos-plugins/breaker-box/"
+
+            cp watcher/watcher.js "$PKGDIR/usr/local/lib/breaker-box-watcher/watcher.js"
+            cp watcher/breaker-box-watcher.init "$PKGDIR/etc/init.d/breaker-box-watcher"
+            chmod 755 "$PKGDIR/etc/init.d/breaker-box-watcher"
 
             cat > "$PKGDIR/DEBIAN/control" <<EOF
           Package: breaker-box
@@ -59,17 +64,28 @@ jobs:
           Description: Breaker Box
            Flip a Cloudflare Worker's MODE secret (maintenance / restarting /
            off) from a button in MOS, via your own Cloudflare API token and
-           a small CORS proxy Worker.
+           a small CORS proxy Worker. Includes an optional background
+           watcher service that flips it automatically on a real Docker
+           container restart.
           EOF
 
             cat > "$PKGDIR/DEBIAN/postinst" <<'EOF'
           #!/bin/bash
+          if command -v update-rc.d >/dev/null 2>&1; then
+            update-rc.d breaker-box-watcher defaults >/dev/null 2>&1 || true
+          fi
+          /etc/init.d/breaker-box-watcher start >/dev/null 2>&1 || true
           exit 0
           EOF
             chmod +x "$PKGDIR/DEBIAN/postinst"
 
             cat > "$PKGDIR/DEBIAN/postrm" <<'EOF'
           #!/bin/bash
+          /etc/init.d/breaker-box-watcher stop >/dev/null 2>&1 || true
+          if command -v update-rc.d >/dev/null 2>&1; then
+            update-rc.d -f breaker-box-watcher remove >/dev/null 2>&1 || true
+          fi
+          rm -f /run/breaker-box-watcher.pid 2>/dev/null || true
           exit 0
           EOF
             chmod +x "$PKGDIR/DEBIAN/postrm"

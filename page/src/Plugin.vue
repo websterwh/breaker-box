@@ -45,13 +45,7 @@
       </div>
       <div class="status-row" v-if="form.containerName">
         <span class="label">Watching container</span>
-        <span class="value">
-          {{ form.containerName }} — {{ containerWatchState.error ? 'error' : (containerWatchState.dockerState || 'checking…') }}
-        </span>
-      </div>
-      <div class="status-row" v-if="containerWatchState.error">
-        <span class="label"></span>
-        <span class="value watch-error">{{ containerWatchState.error }}</span>
+        <span class="value">{{ form.containerName }} (background service)</span>
       </div>
     </div>
 
@@ -118,12 +112,15 @@
         <div class="msg-group">
           <h3>Container watch (optional)</h3>
           <p class="modal-intro">
-            Pick the Docker container behind this Worker. While this browser tab stays
-            open, the plugin checks it every few seconds — when it sees the container
-            actually restarting, it shows the real container name instead of a generic
-            message and keeps showing "Restarting" for as long as the restart is
-            confirmed still happening, not just for a fixed 15 minutes. Closing the tab
-            stops the checks; leave this blank to skip the feature entirely.
+            Pick the Docker container behind this Worker. A background service
+            (installed alongside this plugin, runs independently of this browser tab)
+            checks it every few seconds — when it sees the container actually
+            restarting, it shows the real container name instead of a generic message
+            and keeps showing "Restarting" for as long as the restart is confirmed
+            still happening, not just for a fixed 15 minutes. Leave this blank to skip
+            the feature entirely. See
+            <a href="https://github.com/websterwh/breaker-box/tree/main/watcher" target="_blank" rel="noopener">watcher/README.md</a>
+            for how it works and its logs.
           </p>
           <label class="field">
             <span>Container to watch</span>
@@ -235,11 +232,6 @@ import { WORKER_SOURCE, WORKER_COMPATIBILITY_DATE } from "./generated/worker-bun
 
 const PLUGIN_NAME = "breaker-box";
 
-// How often the container watch polls MOS's Docker proxy while this
-// component is mounted. Only runs in the browser tab - see the
-// "Container watch" section in Settings for what this trades off.
-const CONTAINER_POLL_MS = 10000;
-
 const MODE_LABELS = {
   M: "Under Maintenance",
   R: "Restarting",
@@ -304,8 +296,6 @@ export default {
       containerOptions: [],
       loadingContainers: false,
       containerOptionsError: null,
-      containerWatchState: { dockerState: null, error: null },
-      containerRestartOverrideActive: false,
       messagesForm: {
         maintTitle: "",
         maintBody: "",
@@ -339,12 +329,10 @@ export default {
     document.addEventListener("keydown", this.handleGlobalKeydown);
     this.loadSettings().then(() => {
       if (this.configComplete) this.checkSecretExists();
-      this.startContainerWatch();
     });
   },
   beforeUnmount() {
     document.removeEventListener("keydown", this.handleGlobalKeydown);
-    this.stopContainerWatch();
   },
   methods: {
     modeLabel(v) {
@@ -453,9 +441,6 @@ export default {
         if (settings.messagesForm) this.messagesForm = { ...this.messagesForm, ...settings.messagesForm };
         if (settings.messagesPushedAt) this.messagesPushedAt = settings.messagesPushedAt;
         if (settings.codePushedAt) this.codePushedAt = settings.codePushedAt;
-        if (typeof settings.containerRestartOverrideActive === "boolean") {
-          this.containerRestartOverrideActive = settings.containerRestartOverrideActive;
-        }
       } catch (e) {
         this.loadLocalSettingsFallback();
       }
@@ -472,7 +457,6 @@ export default {
             messagesForm: this.messagesForm,
             messagesPushedAt: this.messagesPushedAt,
             codePushedAt: this.codePushedAt,
-            containerRestartOverrideActive: this.containerRestartOverrideActive,
           }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -490,9 +474,6 @@ export default {
           if (parsed.messagesForm) this.messagesForm = { ...this.messagesForm, ...parsed.messagesForm };
           if (parsed.messagesPushedAt) this.messagesPushedAt = parsed.messagesPushedAt;
           if (parsed.codePushedAt) this.codePushedAt = parsed.codePushedAt;
-          if (typeof parsed.containerRestartOverrideActive === "boolean") {
-            this.containerRestartOverrideActive = parsed.containerRestartOverrideActive;
-          }
         }
       } catch (e) {
         // No settings yet - fine, starts empty.
@@ -508,7 +489,6 @@ export default {
             messagesForm: this.messagesForm,
             messagesPushedAt: this.messagesPushedAt,
             codePushedAt: this.codePushedAt,
-            containerRestartOverrideActive: this.containerRestartOverrideActive,
           })
         );
       } catch (e) {
@@ -516,17 +496,11 @@ export default {
       }
     },
     saveSettings() {
-      const containerChanged = this.formSnapshot && this.formSnapshot.containerName !== this.form.containerName;
       this.formSnapshot = null;
       this.showSettings = false;
       this.error = null;
       this.saveSettingsToServer();
       if (this.configComplete) this.checkSecretExists();
-      if (containerChanged) {
-        this.stopContainerWatch();
-        this.containerWatchState = { dockerState: null, error: null };
-        this.startContainerWatch();
-      }
     },
 
     // --- Cloudflare API, via the Worker's own built-in relay ---
@@ -705,10 +679,11 @@ export default {
       }
     },
 
-    // --- Container watch: live via MOS's Docker proxy, browser-tab-only ---
+    // --- Container watch: dropdown only, via MOS's Docker proxy ---
     // (Cloudflare Workers run at the edge and can't reach a LAN Docker
-    // socket directly - see worker/README.md. This runs here instead,
-    // for as long as this tab stays open.)
+    // socket directly - see worker/README.md. The actual watching happens
+    // in the background service, watcher/watcher.js - this is just for
+    // populating the dropdown below.)
     async loadContainerOptions() {
       this.loadingContainers = true;
       this.containerOptionsError = null;
@@ -727,86 +702,6 @@ export default {
         this.containerOptionsError = `Couldn't load containers: ${e.message}`;
       } finally {
         this.loadingContainers = false;
-      }
-    },
-    startContainerWatch() {
-      if (this._containerWatchTimer || !this.form.containerName || !this.configComplete) return;
-      this.checkContainerState();
-      this._containerWatchTimer = setInterval(this.checkContainerState, CONTAINER_POLL_MS);
-    },
-    stopContainerWatch() {
-      if (this._containerWatchTimer) {
-        clearInterval(this._containerWatchTimer);
-        this._containerWatchTimer = null;
-      }
-    },
-    async checkContainerState() {
-      const name = this.form.containerName;
-      if (!name || !this.configComplete) return;
-      try {
-        const res = await fetch(`${this.apiBase}/docker/containers/json?all=true`, {
-          headers: this.mosAuthHeaders(),
-          credentials: "include",
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const containers = await res.json();
-        const match = (containers || []).find(
-          (c) => c.Names && c.Names.some((n) => n.replace(/^\//, "") === name)
-        );
-        if (!match) {
-          this.containerWatchState = { dockerState: null, error: `"${name}" not found` };
-          return;
-        }
-
-        const state = match.State; // "running" | "restarting" | "exited" | ...
-        const wasRestarting = this.containerWatchState.dockerState === "restarting";
-        this.containerWatchState = { dockerState: state, error: null };
-
-        if (state === "restarting" && !wasRestarting) {
-          await this.beginContainerRestartOverride(name);
-        } else if (state === "restarting" && wasRestarting) {
-          // Still restarting - just refresh the freshness timestamp the
-          // Worker checks, so it knows this is a live, current signal.
-          await this.putSecret("CONTAINER_WATCH_AT", String(Date.now())).catch(() => {});
-        } else if (state === "running" && (wasRestarting || this.containerRestartOverrideActive)) {
-          await this.endContainerRestartOverride();
-        }
-      } catch (e) {
-        this.containerWatchState = { ...this.containerWatchState, error: `Watch check failed: ${e.message}` };
-      }
-    },
-    async beginContainerRestartOverride(name) {
-      try {
-        await this.putSecret("RESTART_TITLE", `${name} is restarting`);
-        await this.putSecret(this.form.secretName, "R");
-        await this.putSecret("CONTAINER_WATCH_AT", String(Date.now()));
-        this.containerRestartOverrideActive = true;
-        this.lastKnownState = { value: "R", setAt: Date.now(), revertAt: null };
-        this.saveSettingsToServer();
-      } catch (e) {
-        this.containerWatchState = { ...this.containerWatchState, error: `Couldn't flip Worker to Restarting: ${e.message}` };
-      }
-    },
-    // Cloudflare secrets are write-only - there's no way to read back
-    // whatever RESTART_TITLE was before this override, so "normal" here
-    // means whatever the plugin's own saved Messages say (or the Worker's
-    // built-in default if left blank), same source of truth pushMessages() uses.
-    async endContainerRestartOverride() {
-      try {
-        const normalTitle = (this.messagesForm.restartTitle || "").trim();
-        if (normalTitle) {
-          await this.putSecret("RESTART_TITLE", normalTitle);
-        } else {
-          await this.deleteSecretIfPresent("RESTART_TITLE");
-        }
-        await this.deleteSecretIfPresent(this.form.secretName);
-        await this.deleteSecretIfPresent(this.revertSecretName());
-        await this.deleteSecretIfPresent("CONTAINER_WATCH_AT");
-        this.containerRestartOverrideActive = false;
-        this.lastKnownState = { value: "off", setAt: Date.now(), revertAt: null };
-        this.saveSettingsToServer();
-      } catch (e) {
-        this.containerWatchState = { ...this.containerWatchState, error: `Couldn't clear Worker override: ${e.message}` };
       }
     },
   },
@@ -995,6 +890,13 @@ export default {
   color: #9a9aa2;
   line-height: 1.5;
   margin: -0.25rem 0 1rem;
+}
+.modal-intro a {
+  color: #60a5fa;
+}
+.modal-intro a:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
 }
 .msg-group {
   border-top: 1px solid #26262c;

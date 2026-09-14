@@ -1,0 +1,81 @@
+#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:          breaker-box-watcher
+# Required-Start:    $local_fs $remote_fs $network $syslog
+# Required-Stop:     $local_fs $remote_fs $network $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: starts the breaker-box container watcher
+# Description:       watches a Docker container's state and updates a
+#                     Breaker Box Worker's MODE/message secrets when it
+#                     restarts, independent of the MOS web UI
+### END INIT INFO
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+DAEMON="/usr/bin/node"
+ARGS="watcher.js"
+NAME="breaker-box-watcher"
+DESC="breaker-box-watcher"
+USER="root"
+
+DIRECTORY="/usr/local/lib/breaker-box-watcher"
+PID="/run/breaker-box-watcher.pid"
+
+. /lib/init/vars.sh
+. /lib/lsb/init-functions
+
+start_watcher() {
+  start-stop-daemon --start --background --make-pidfile --pidfile $PID \
+    --chdir "$DIRECTORY" --user $USER --exec "$DAEMON" --output /var/log/breaker-box-watcher -- $ARGS >/dev/null 2>&1
+}
+
+stop_watcher() {
+  start-stop-daemon --stop --pidfile "$PID"
+}
+
+case "$1" in
+  start)
+    log_daemon_msg "Starting $DESC" "$NAME"
+    start_watcher
+    case "$?" in
+      0|1) log_end_msg 0 ;;
+      2)   log_end_msg 1 ;;
+    esac
+  ;;
+  stop)
+    log_daemon_msg "Stopping $DESC" "$NAME"
+    stop_watcher
+    case "$?" in
+      0|1) log_end_msg 0 ;;
+      2)   log_end_msg 1 ;;
+    esac
+  ;;
+  restart)
+    log_daemon_msg "Restarting $DESC" "$NAME"
+
+    stop_watcher
+    case "$?" in
+      0|1)
+        sleep 1
+        start_watcher
+        case "$?" in
+          0) log_end_msg 0 ;;
+          1) log_end_msg 1 ;; # Old process is still running
+          *) log_end_msg 1 ;; # Failed to start
+        esac
+      ;;
+      *)
+        # Failed to stop
+        log_end_msg 1
+      ;;
+    esac
+  ;;
+  status)
+    status_of_proc -p $PID "$DAEMON" "$NAME" && exit 0 || exit $?
+  ;;
+  *)
+    echo "Usage: $NAME {start|stop|restart|status}" >&2
+    exit 3
+  ;;
+esac
