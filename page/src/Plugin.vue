@@ -12,7 +12,7 @@
     </div>
 
     <div v-if="!configComplete" class="banner banner-warn">
-      Not configured yet. Open Settings (⚙) and fill in your proxy Worker URL, Cloudflare API
+      Not configured yet. Open Settings (⚙) and fill in your Worker URL, Cloudflare API
       token, Account ID, and Worker script name.
     </div>
 
@@ -74,9 +74,9 @@
         <h2 id="settings-title">Settings</h2>
 
         <label class="field">
-          <span>Proxy Worker URL</span>
-          <input v-model="form.proxyUrl" type="text" placeholder="https://proxy-worker.you.workers.dev" />
-          <small>Your deployed proxy-worker Worker.</small>
+          <span>Worker URL</span>
+          <input v-model="form.workerUrl" type="text" placeholder="https://breaker-box-worker.you.workers.dev" />
+          <small>Your deployed Worker. It handles both site traffic and the plugin's Cloudflare API calls.</small>
         </label>
 
         <label class="field">
@@ -92,14 +92,33 @@
 
         <label class="field">
           <span>Worker Script Name</span>
-          <input v-model="form.scriptName" type="text" placeholder="e.g. maintenance-worker" />
-          <small>The Worker that reads the MODE secret and serves the page.</small>
+          <input v-model="form.scriptName" type="text" placeholder="e.g. breaker-box-worker" />
+          <small>The Worker's script name, as shown in the Cloudflare dashboard.</small>
         </label>
 
         <label class="field">
           <span>Secret Name</span>
           <input v-model="form.secretName" type="text" placeholder="MODE" />
         </label>
+
+        <div class="msg-group">
+          <h3>Worker code</h3>
+          <p class="modal-intro">
+            Pushes the plugin's bundled copy of the Worker's code to your deployed Worker,
+            so you don't have to copy/paste it manually after an update. Existing secrets
+            and variables are read back and re-submitted unchanged — confirm with
+            "Refresh status" afterward the first time you use this.
+          </p>
+          <div class="status-row" v-if="codePushedAt">
+            <span class="label">Code last pushed</span>
+            <span class="value">{{ fmtAge(codePushedAt) }}</span>
+          </div>
+          <div class="modal-actions modal-actions-left">
+            <button class="btn btn-primary" :disabled="!configComplete || pushingCode" @click="pushWorkerCode">
+              {{ pushingCode ? 'Pushing…' : 'Update Worker Code' }}
+            </button>
+          </div>
+        </div>
 
         <div class="modal-actions">
           <button class="btn" @click="closeModals">Cancel</button>
@@ -173,6 +192,8 @@
 </template>
 
 <script>
+import { WORKER_SOURCE, WORKER_COMPATIBILITY_DATE } from "./generated/worker-bundle.js";
+
 const PLUGIN_NAME = "breaker-box";
 
 const MODE_LABELS = {
@@ -181,7 +202,7 @@ const MODE_LABELS = {
   off: "Normal",
 };
 
-// Field -> Worker secret name. Matches maintenance-worker/src/index.js's
+// Field -> Worker secret name. Matches workers/worker/src/index.js's
 // DEFAULT_MESSAGES keys exactly, since these are pushed as secrets with
 // these names.
 const MESSAGE_SECRET_NAMES = {
@@ -194,7 +215,7 @@ const MESSAGE_SECRET_NAMES = {
   footnote: "FOOTNOTE",
 };
 
-// Mirrors maintenance-worker's DEFAULT_MESSAGES, shown as field placeholders
+// Mirrors the Worker's DEFAULT_MESSAGES, shown as field placeholders
 // so the settings panel reflects what visitors actually see today.
 const DEFAULT_MESSAGES = {
   maintTitle: "Under maintenance",
@@ -219,13 +240,15 @@ export default {
       checking: false,
       busy: null, // 'M' | 'R' | 'off' | null
       pushingMessages: false,
+      pushingCode: false,
       secretExists: null, // true | false | null (unknown)
       lastKnownState: { value: null, setAt: null, revertAt: null },
       messagesPushedAt: null,
+      codePushedAt: null,
       revertMinutes: 0, // 0 = no timer
       defaults: DEFAULT_MESSAGES,
       form: {
-        proxyUrl: "",
+        workerUrl: "",
         apiToken: "",
         accountId: "",
         scriptName: "",
@@ -245,7 +268,7 @@ export default {
   computed: {
     configComplete() {
       const f = this.form;
-      return !!(f.proxyUrl && f.apiToken && f.accountId && f.scriptName && f.secretName);
+      return !!(f.workerUrl && f.apiToken && f.accountId && f.scriptName && f.secretName);
     },
   },
   mounted() {
@@ -344,6 +367,7 @@ export default {
         if (settings.lastKnownState) this.lastKnownState = settings.lastKnownState;
         if (settings.messagesForm) this.messagesForm = { ...this.messagesForm, ...settings.messagesForm };
         if (settings.messagesPushedAt) this.messagesPushedAt = settings.messagesPushedAt;
+        if (settings.codePushedAt) this.codePushedAt = settings.codePushedAt;
       } catch (e) {
         this.loadLocalSettingsFallback();
       }
@@ -359,6 +383,7 @@ export default {
             lastKnownState: this.lastKnownState,
             messagesForm: this.messagesForm,
             messagesPushedAt: this.messagesPushedAt,
+            codePushedAt: this.codePushedAt,
           }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -375,6 +400,7 @@ export default {
           if (parsed.lastKnownState) this.lastKnownState = parsed.lastKnownState;
           if (parsed.messagesForm) this.messagesForm = { ...this.messagesForm, ...parsed.messagesForm };
           if (parsed.messagesPushedAt) this.messagesPushedAt = parsed.messagesPushedAt;
+          if (parsed.codePushedAt) this.codePushedAt = parsed.codePushedAt;
         }
       } catch (e) {
         // No settings yet - fine, starts empty.
@@ -389,6 +415,7 @@ export default {
             lastKnownState: this.lastKnownState,
             messagesForm: this.messagesForm,
             messagesPushedAt: this.messagesPushedAt,
+            codePushedAt: this.codePushedAt,
           })
         );
       } catch (e) {
@@ -402,10 +429,15 @@ export default {
       if (this.configComplete) this.checkSecretExists();
     },
 
-    // --- Cloudflare API, via the user's own proxy Worker ---
+    // --- Cloudflare API, via the Worker's own built-in relay ---
+    relayBase() {
+      return this.form.workerUrl.replace(/\/$/, "") + "/__bbproxy";
+    },
+    scriptUrl() {
+      return `${this.relayBase()}/client/v4/accounts/${this.form.accountId}/workers/scripts/${this.form.scriptName}`;
+    },
     secretsUrl() {
-      const base = this.form.proxyUrl.replace(/\/$/, "");
-      return `${base}/client/v4/accounts/${this.form.accountId}/workers/scripts/${this.form.scriptName}/secrets`;
+      return `${this.scriptUrl()}/secrets`;
     },
     cfAuthHeaders() {
       return {
@@ -515,6 +547,60 @@ export default {
         this.error = `Failed to push messages: ${e.message}`;
       } finally {
         this.pushingMessages = false;
+      }
+    },
+    async fetchWorkerSettings() {
+      const res = await fetch(`${this.scriptUrl()}/settings`, {
+        headers: { Authorization: `Bearer ${this.form.apiToken}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
+      }
+      return data.result || {};
+    },
+    // Reads back the Worker's current bindings (secrets, vars) and
+    // re-submits them unchanged alongside the new code. Cloudflare's docs
+    // don't clearly state whether omitting `bindings` on a script update
+    // preserves or wipes existing ones, so this doesn't rely on that -
+    // it explicitly echoes back what's already there instead of gambling
+    // with MODE and the message secrets.
+    async pushWorkerCode() {
+      if (!this.configComplete || this.pushingCode) return;
+      this.pushingCode = true;
+      this.error = null;
+      this.successMessage = null;
+      try {
+        const settings = await this.fetchWorkerSettings();
+        const metadata = {
+          main_module: "index.js",
+          compatibility_date: settings.compatibility_date || WORKER_COMPATIBILITY_DATE,
+        };
+        if (settings.compatibility_flags) metadata.compatibility_flags = settings.compatibility_flags;
+        if (settings.bindings) metadata.bindings = settings.bindings;
+
+        const body = new FormData();
+        body.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+        body.append("index.js", new Blob([WORKER_SOURCE], { type: "application/javascript+module" }), "index.js");
+
+        const res = await fetch(this.scriptUrl(), {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${this.form.apiToken}` },
+          body,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success === false) {
+          throw new Error(data?.errors?.[0]?.message || `HTTP ${res.status}`);
+        }
+
+        this.codePushedAt = Date.now();
+        this.saveSettingsToServer();
+        this.successMessage = "Worker code updated. Use Refresh status to confirm secrets are intact.";
+        await this.checkSecretExists();
+      } catch (e) {
+        this.error = `Failed to update Worker code: ${e.message}`;
+      } finally {
+        this.pushingCode = false;
       }
     },
   },
@@ -765,5 +851,8 @@ export default {
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 1rem;
+}
+.modal-actions-left {
+  justify-content: flex-start;
 }
 </style>

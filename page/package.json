@@ -6,7 +6,7 @@
   "author": "websterwh",
   "license": "MIT",
   "scripts": {
-    "build": "vite build && node scripts/generate-manifest.mjs"
+    "build": "node scripts/copy-worker-source.mjs && vite build && node scripts/generate-manifest.mjs"
   },
   "dependencies": {
     "vue": "^3.4.0"

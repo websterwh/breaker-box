@@ -6,6 +6,13 @@ const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 // down" display timer.
 const CACHE_KEY = new Request("https://internal.invalid/breaker-box-down-since");
 
+// Reserved path prefix for the built-in CORS relay to api.cloudflare.com
+// (see relayToCloudflareApi below). Real site traffic through this Worker
+// is never expected to use this prefix; if it somehow does, that request
+// would have been relayed to Cloudflare's API instead of your origin, so
+// keep this specific enough that it can't collide with a real route.
+const RELAY_PREFIX = "/__bbproxy";
+
 const DEFAULT_MESSAGES = {
     MAINT_TITLE: "Under maintenance",
     MAINT_BODY: "This server is offline for scheduled maintenance. It'll be back online shortly.",
@@ -19,8 +26,8 @@ const DEFAULT_MESSAGES = {
 // Every value here is optional. Set it as a Worker secret or variable
 // (Cloudflare dashboard -> this Worker -> Settings -> Variables and
 // Secrets), or from the Breaker Box plugin's Messages settings, which
-// writes to the same names through the proxy Worker. Unset falls back to
-// the text above.
+// writes to the same names through this Worker's built-in relay. Unset
+// falls back to the text above.
 function messages(env) {
     const out = {};
     for (const key of Object.keys(DEFAULT_MESSAGES)) {
@@ -40,7 +47,7 @@ function messages(env) {
 // exactly as before.
 async function deleteSecret(env, name) {
     if (!env.CF_API_TOKEN || !env.CF_ACCOUNT_ID) return;
-    const scriptName = env.CF_SCRIPT_NAME || "maintenance-worker";
+    const scriptName = env.CF_SCRIPT_NAME || "breaker-box-worker";
     const url = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/workers/scripts/${scriptName}/secrets/${name}`;
     try {
         // A 404/"not found" here just means it's already cleared - fine either way.
@@ -64,8 +71,87 @@ function timerExpired(env) {
     return !isNaN(revertAt) && Date.now() >= revertAt;
 }
 
+// Generic CORS-unlocking relay to api.cloudflare.com, mounted at
+// RELAY_PREFIX. Browsers can't call api.cloudflare.com directly - it
+// doesn't send Access-Control-Allow-Origin headers, so the browser blocks
+// the request before it reaches Cloudflare. The Breaker Box plugin talks
+// to this instead: it forwards whatever the caller sends (method, path,
+// headers, body) to api.cloudflare.com untouched, then adds CORS headers
+// to the response so the browser accepts it.
+//
+// This relay holds no secrets of its own. The caller supplies their own
+// Cloudflare API token with every request; this Worker only relays it
+// upstream and never stores or logs it. Only requests to
+// api.cloudflare.com are ever forwarded - it cannot reach any other host.
+const CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization,Content-Type,X-Auth-Email,X-Auth-Key",
+    "Access-Control-Max-Age": "86400",
+};
+
+async function relayToCloudflareApi(request, url) {
+    if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
+    const upstreamPath = url.pathname.slice(RELAY_PREFIX.length) || "/";
+    if (upstreamPath === "/" && request.method === "GET") {
+        return new Response(
+            JSON.stringify({ ok: true, proxying: "https://api.cloudflare.com" }),
+            { headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+    }
+
+    const upstreamUrl = "https://api.cloudflare.com" + upstreamPath + url.search;
+
+    const headers = new Headers(request.headers);
+    headers.delete("host");
+    headers.delete("origin");
+    headers.delete("referer");
+    headers.delete("cf-connecting-ip");
+    headers.delete("cf-ray");
+    headers.delete("cf-visitor");
+
+    const init = {
+        method: request.method,
+        headers,
+        body: ["GET", "HEAD"].includes(request.method)
+            ? undefined
+            : await request.arrayBuffer(),
+    };
+
+    let upstreamResponse;
+    try {
+        upstreamResponse = await fetch(upstreamUrl, init);
+    } catch (err) {
+        return new Response(
+            JSON.stringify({ success: false, errors: [{ message: `Relay fetch failed: ${err.message}` }] }),
+            { status: 502, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
+        );
+    }
+
+    const responseHeaders = new Headers(upstreamResponse.headers);
+    for (const [k, v] of Object.entries(CORS_HEADERS)) {
+        responseHeaders.set(k, v);
+    }
+    responseHeaders.delete("set-cookie");
+
+    return new Response(upstreamResponse.body, {
+        status: upstreamResponse.status,
+        statusText: upstreamResponse.statusText,
+        headers: responseHeaders,
+    });
+}
+
 export default {
     async fetch(request, env, ctx) {
+        const url = new URL(request.url);
+
+        if (url.pathname === RELAY_PREFIX || url.pathname.startsWith(RELAY_PREFIX + "/")) {
+            return relayToCloudflareApi(request, url);
+        }
+
         // Timer safety net: if a revert-at time has passed, clear MODE (and the
         // timer secret) and fall straight through to normal auto-detect for
         // this request - don't make the visitor wait an extra round trip.
