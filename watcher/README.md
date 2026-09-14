@@ -67,9 +67,17 @@ configured:
    still a live, current signal - see
    [worker/README.md](../worker#optional-live-container-aware-restart-detection)
    for what it does with that.
-3. Once none are restarting: reverts `RESTART_TITLE` to whatever you've
-   set in the plugin's Messages panel (or the Worker's default if you
-   haven't), clears `MODE`, and removes `CONTAINER_WATCH_AT`.
+3. Once Docker reports a container `"running"` again, it holds the
+   override for an 8-second grace period before actually reverting -
+   Docker reporting "running" means the process started, not that
+   whatever's inside has finished starting up and is ready to serve
+   requests, and reverting immediately risks pulling the custom message
+   out from under a container that isn't really ready yet, right as a
+   real visitor is most likely to hit it. A flap back to non-running
+   during that window resets the grace period, since that's still an
+   active restart. Once the grace period holds, it reverts `RESTART_TITLE`
+   to whatever you've set in the plugin's Messages panel (or the Worker's
+   default if you haven't), clears `MODE`, and removes `CONTAINER_WATCH_AT`.
 4. If a container's been "restarting" for more than 20 minutes straight,
    it's probably not actually coming back - the watcher stops treating it
    as one and lets the Worker's own elapsed-time Offline behavior take

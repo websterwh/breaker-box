@@ -164,12 +164,22 @@ let lastSkipReason = null;
 // a container that's already stopped when this service starts is never
 // mistaken for "just started restarting".
 const previousStates = new Map(); // name -> last observed state
-const activeRestarts = new Map(); // name -> { startedAt }
+const activeRestarts = new Map(); // name -> { startedAt, readyAt }
 // Give up treating something as "still restarting" after this long and
 // let the Worker's own elapsed-time Offline behavior take back over -
 // otherwise a container that's actually just stopped for good would show
 // "restarting" forever.
 const MAX_RESTART_WAIT_MS = 20 * 60 * 1000;
+// Docker reporting "running" means the container process started, not
+// that whatever's inside is actually ready to serve requests yet - a web
+// app can easily still be initializing for a few seconds after that.
+// Reverting the moment Docker says "running" pulls the custom message
+// out from under a container that isn't really ready yet, right when a
+// real request is most likely to hit it and fall through to the
+// Worker's normal (generic) fallback. Wait for "running" to hold for
+// this long before actually reverting; a flap back to non-running
+// during the wait resets it, since that's still an active restart.
+const REVERT_GRACE_MS = 8000;
 
 function titleFor(names) {
   return names.length === 1 ? `${names[0]} is restarting` : `${names.join(", ")} are restarting`;
@@ -254,17 +264,32 @@ async function tickImpl() {
   for (const [name, state] of states) {
     const prev = previousStates.get(name);
     if (prev === "running" && state !== "running" && !activeRestarts.has(name)) {
-      activeRestarts.set(name, { startedAt: now });
+      activeRestarts.set(name, { startedAt: now, readyAt: null });
       log(`"${name}" stopped running (now "${state}") - treating as a restart`);
-    } else if (activeRestarts.has(name) && state === "running") {
-      activeRestarts.delete(name);
+    } else if (activeRestarts.has(name)) {
+      const info = activeRestarts.get(name);
+      if (state === "running") {
+        if (info.readyAt === null) {
+          info.readyAt = now;
+          // Recheck precisely when the grace period ends, rather than
+          // waiting for the next periodic poll (which could be up to
+          // POLL_MS late reverting).
+          setTimeout(tick, REVERT_GRACE_MS + 200);
+        }
+      } else {
+        info.readyAt = null; // flapped back down mid-grace-period, still restarting
+      }
     }
     previousStates.set(name, state);
   }
-  // Containers that disappeared (removed) or have been "restarting" too
-  // long to plausibly still be a real restart - stop tracking them.
+  // Containers that disappeared (removed), have held "running" through
+  // the grace period above, or have been down too long to plausibly
+  // still be a real restart - stop tracking them. This is what actually
+  // reverts the override, once it's safe to.
   for (const [name, info] of activeRestarts) {
     if (!states.has(name)) {
+      activeRestarts.delete(name);
+    } else if (info.readyAt !== null && now - info.readyAt >= REVERT_GRACE_MS) {
       activeRestarts.delete(name);
     } else if (now - info.startedAt > MAX_RESTART_WAIT_MS) {
       log(`"${name}" has been down for over ${MAX_RESTART_WAIT_MS / 60000} min - giving up, falling back to the Worker's normal Offline handling`);
