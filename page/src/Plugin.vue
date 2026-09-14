@@ -149,6 +149,10 @@
             <span class="label">Code last pushed</span>
             <span class="value">{{ fmtAge(codePushedAt) }}</span>
           </div>
+          <label class="field-checkbox">
+            <input type="checkbox" v-model="form.autoPushCode" />
+            <span>Automatically push new code when this plugin updates</span>
+          </label>
           <div class="modal-actions modal-actions-left">
             <button class="btn btn-primary" :disabled="!configComplete || pushingCode" @click="pushWorkerCode">
               {{ pushingCode ? 'Pushing…' : 'Update Worker Code' }}
@@ -230,6 +234,19 @@
 <script>
 import { WORKER_SOURCE, WORKER_COMPATIBILITY_DATE } from "./generated/worker-bundle.js";
 
+// Cheap change-detection for the bundled Worker source, not a real
+// checksum - just enough to tell "auto-push" whether this plugin build's
+// code differs from what was last actually pushed, so it doesn't PUT the
+// same code to the Worker on every single page load.
+function hashSource(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (Math.imul(31, hash) + str.charCodeAt(i)) | 0;
+  }
+  return hash.toString(36);
+}
+const WORKER_SOURCE_HASH = hashSource(WORKER_SOURCE);
+
 const PLUGIN_NAME = "breaker-box";
 
 const MODE_LABELS = {
@@ -292,7 +309,9 @@ export default {
         scriptName: "",
         secretName: "MODE",
         containerName: "",
+        autoPushCode: true,
       },
+      lastPushedWorkerHash: null,
       containerOptions: [],
       loadingContainers: false,
       containerOptionsError: null,
@@ -329,6 +348,13 @@ export default {
     document.addEventListener("keydown", this.handleGlobalKeydown);
     this.loadSettings().then(() => {
       if (this.configComplete) this.checkSecretExists();
+      // Auto-push: only when enabled, connection settings are filled in,
+      // and this build's Worker source actually differs from what was
+      // last pushed - otherwise every normal page load would re-PUT the
+      // same code to Cloudflare for no reason.
+      if (this.configComplete && this.form.autoPushCode && this.lastPushedWorkerHash !== WORKER_SOURCE_HASH) {
+        this.pushWorkerCode();
+      }
     });
   },
   beforeUnmount() {
@@ -441,6 +467,7 @@ export default {
         if (settings.messagesForm) this.messagesForm = { ...this.messagesForm, ...settings.messagesForm };
         if (settings.messagesPushedAt) this.messagesPushedAt = settings.messagesPushedAt;
         if (settings.codePushedAt) this.codePushedAt = settings.codePushedAt;
+        if (settings.lastPushedWorkerHash) this.lastPushedWorkerHash = settings.lastPushedWorkerHash;
       } catch (e) {
         this.loadLocalSettingsFallback();
       }
@@ -457,6 +484,7 @@ export default {
             messagesForm: this.messagesForm,
             messagesPushedAt: this.messagesPushedAt,
             codePushedAt: this.codePushedAt,
+            lastPushedWorkerHash: this.lastPushedWorkerHash,
           }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -474,6 +502,7 @@ export default {
           if (parsed.messagesForm) this.messagesForm = { ...this.messagesForm, ...parsed.messagesForm };
           if (parsed.messagesPushedAt) this.messagesPushedAt = parsed.messagesPushedAt;
           if (parsed.codePushedAt) this.codePushedAt = parsed.codePushedAt;
+          if (parsed.lastPushedWorkerHash) this.lastPushedWorkerHash = parsed.lastPushedWorkerHash;
         }
       } catch (e) {
         // No settings yet - fine, starts empty.
@@ -489,6 +518,7 @@ export default {
             messagesForm: this.messagesForm,
             messagesPushedAt: this.messagesPushedAt,
             codePushedAt: this.codePushedAt,
+            lastPushedWorkerHash: this.lastPushedWorkerHash,
           })
         );
       } catch (e) {
@@ -673,6 +703,7 @@ export default {
         }
 
         this.codePushedAt = Date.now();
+        this.lastPushedWorkerHash = WORKER_SOURCE_HASH;
         this.saveSettingsToServer();
         this.successMessage = "Worker code updated. Use Refresh status to confirm secrets are intact.";
         await this.checkSecretExists();
@@ -959,6 +990,27 @@ export default {
 .field small {
   color: #7d7d85;
   font-size: 0.75rem;
+}
+.field-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  padding: 0.4rem 0;
+  min-height: 44px;
+  box-sizing: border-box;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+.field-checkbox input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.field-checkbox input:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 1px;
 }
 .field-with-button {
   display: flex;

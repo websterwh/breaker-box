@@ -70,6 +70,13 @@ read back or re-submit for those; it only re-submits non-secret bindings
 is what makes Cloudflare keep what's already bound. Confirm with
 "Refresh status" afterward the first time you use it.
 
+"Automatically push new code when this plugin updates" (checked by
+default, next to the button) runs this same action on its own whenever
+the plugin loads with connection settings filled in and this build's
+bundled Worker code differs from whatever was last actually pushed -
+tracked by a lightweight hash, not re-pushed on every ordinary page
+load. Uncheck it to only push manually.
+
 ## Optional: live container-aware restart detection
 
 [`watcher/`](../watcher) - a small background service installed

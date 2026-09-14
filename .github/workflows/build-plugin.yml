@@ -74,7 +74,12 @@ jobs:
           if command -v update-rc.d >/dev/null 2>&1; then
             update-rc.d breaker-box-watcher defaults >/dev/null 2>&1 || true
           fi
-          /etc/init.d/breaker-box-watcher start >/dev/null 2>&1 || true
+          # restart, not start: on an upgrade the old process is already
+          # running under this pidfile, and `start` skips launching a
+          # second one - the new watcher.js on disk never actually takes
+          # over until something restarts it. restart's stop-then-start
+          # picks up new code on both a fresh install and an upgrade.
+          /etc/init.d/breaker-box-watcher restart >/dev/null 2>&1 || true
           exit 0
           EOF
             chmod +x "$PKGDIR/DEBIAN/postinst"

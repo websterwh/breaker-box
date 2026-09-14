@@ -67,17 +67,21 @@ configured:
    still a live, current signal - see
    [worker/README.md](../worker#optional-live-container-aware-restart-detection)
    for what it does with that.
-3. Once Docker reports a container `"running"` again, it holds the
-   override for an 8-second grace period before actually reverting -
-   Docker reporting "running" means the process started, not that
-   whatever's inside has finished starting up and is ready to serve
-   requests, and reverting immediately risks pulling the custom message
-   out from under a container that isn't really ready yet, right as a
-   real visitor is most likely to hit it. A flap back to non-running
-   during that window resets the grace period, since that's still an
-   active restart. Once the grace period holds, it reverts `RESTART_TITLE`
-   to whatever you've set in the plugin's Messages panel (or the Worker's
-   default if you haven't), clears `MODE`, and removes `CONTAINER_WATCH_AT`.
+3. Once Docker reports a container `"running"` again, it doesn't revert
+   right away - "running" means the process started, not that whatever's
+   inside has actually finished starting up and can serve requests.
+   Instead it tries connecting to the container's own published TCP
+   port(s) (from the same container list Docker already gave it) every
+   second, and only reverts once one of them actually accepts a
+   connection - no guessing at an HTTP path or a healthcheck, just "is
+   anything listening yet". A flap back to non-running before that resets
+   it, since that's still an active restart. A container with no
+   published port to check at all (internal-network-only, say) falls
+   back to a flat 8-second grace period after "running" instead, since
+   there's no better signal available in that case. Once it's actually
+   considered done, it reverts `RESTART_TITLE` to whatever you've set in
+   the plugin's Messages panel (or the Worker's default if you haven't),
+   clears `MODE`, and removes `CONTAINER_WATCH_AT`.
 4. If a container's been "restarting" for more than 20 minutes straight,
    it's probably not actually coming back - the watcher stops treating it
    as one and lets the Worker's own elapsed-time Offline behavior take
@@ -102,5 +106,7 @@ convention for where it sends output).
 /etc/init.d/breaker-box-watcher {start|stop|restart|status}
 ```
 
-The plugin's package installs and starts it automatically, and removes
-it on uninstall.
+The plugin's package installs and restarts it automatically on every
+install or update (so a plugin update's new watcher.js actually takes
+over immediately, rather than the previous version continuing to run
+until something restarts it by hand), and removes it on uninstall.
