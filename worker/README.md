@@ -62,10 +62,13 @@ built-in relay:
 The plugin's Settings panel has an "Update Worker Code" action that
 pushes the latest bundled copy of this file to your deployed Worker, so
 you don't have to manually copy/paste code into the dashboard every time
-the plugin updates. Before overwriting the script, it reads back your
-current bindings (secrets, vars) and re-submits them unchanged alongside
-the new code — existing secrets are not expected to be affected, but
-confirm with "Refresh status" afterward the first time you use it.
+the plugin updates. It leaves your existing secrets (`MODE`, message
+overrides, etc.) alone entirely - Cloudflare's API never returns a
+secret's actual value once set, so there's nothing for this action to
+read back or re-submit for those; it only re-submits non-secret bindings
+(if you have any) and otherwise omits `bindings` from the request, which
+is what makes Cloudflare keep what's already bound. Confirm with
+"Refresh status" afterward the first time you use it.
 
 ## Optional: live container-aware restart detection
 

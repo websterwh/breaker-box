@@ -141,8 +141,8 @@
           <h3>Worker code</h3>
           <p class="modal-intro">
             Pushes the plugin's bundled copy of the Worker's code to your deployed Worker,
-            so you don't have to copy/paste it manually after an update. Existing secrets
-            and variables are read back and re-submitted unchanged — confirm with
+            so you don't have to copy/paste it manually after an update. Doesn't touch
+            your existing secrets (MODE, message overrides, etc.) — confirm with
             "Refresh status" afterward the first time you use this.
           </p>
           <div class="status-row" v-if="codePushedAt">
@@ -634,12 +634,15 @@ export default {
       }
       return data.result || {};
     },
-    // Reads back the Worker's current bindings (secrets, vars) and
-    // re-submits them unchanged alongside the new code. Cloudflare's docs
-    // don't clearly state whether omitting `bindings` on a script update
-    // preserves or wipes existing ones, so this doesn't rely on that -
-    // it explicitly echoes back what's already there instead of gambling
-    // with MODE and the message secrets.
+    // Reads back the Worker's current bindings and re-submits the
+    // non-secret ones (vars, KV, etc.) alongside the new code. Secret
+    // bindings are deliberately left out: Cloudflare's settings endpoint
+    // reports that a secret exists (name/type) but never returns its
+    // actual value, so echoing one back fails validation ("missing text
+    // property"). Omitting a binding from this request instead relies on
+    // Cloudflare preserving whatever's already bound under that name -
+    // which is the only option here, since there's no value to send even
+    // if we wanted to.
     async pushWorkerCode() {
       if (!this.configComplete || this.pushingCode) return;
       this.pushingCode = true;
@@ -652,7 +655,8 @@ export default {
           compatibility_date: settings.compatibility_date || WORKER_COMPATIBILITY_DATE,
         };
         if (settings.compatibility_flags) metadata.compatibility_flags = settings.compatibility_flags;
-        if (settings.bindings) metadata.bindings = settings.bindings;
+        const nonSecretBindings = (settings.bindings || []).filter((b) => b.type !== "secret_text");
+        if (nonSecretBindings.length > 0) metadata.bindings = nonSecretBindings;
 
         const body = new FormData();
         body.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
